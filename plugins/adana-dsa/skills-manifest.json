@@ -1,0 +1,61 @@
+[
+  {
+    "name": "costar-saved-search",
+    "area": "Collection",
+    "use_for": "Run a CoStar saved search, screen the grid (FAR/PLSF/PSFB via gateway), and persist deduped properties + broker contacts.",
+    "description": ">-",
+    "deps": {
+      "mcp": [
+        "Claude in Chrome"
+      ],
+      "gateway": [
+        "adana_screen_costar",
+        "adana_ingest_costar_export"
+      ],
+      "files": [],
+      "env": [
+        "gateway_api_key"
+      ]
+    },
+    "version": null
+  },
+  {
+    "name": "reonomy-saved-search",
+    "area": "Collection",
+    "use_for": "Run a Reonomy saved search and persist deduped off-market properties + owner contact shells (flow2).",
+    "description": ">-",
+    "deps": {
+      "mcp": [
+        "Claude in Chrome"
+      ],
+      "gateway": [
+        "adana_ingest_reonomy"
+      ],
+      "files": [],
+      "env": [
+        "gateway_api_key"
+      ]
+    },
+    "version": null
+  },
+  {
+    "name": "lexisnexis-contact-lookup",
+    "area": "Enrichment",
+    "use_for": "Pull pending contacts from the gateway, look up phones/emails via LexisNexis SmartLinx, and write the results back.",
+    "description": ">-",
+    "deps": {
+      "mcp": [
+        "Claude in Chrome"
+      ],
+      "gateway": [
+        "adana_targets_needing_enrichment",
+        "adana_save_contact_lookups"
+      ],
+      "files": [],
+      "env": [
+        "gateway_api_key"
+      ]
+    },
+    "version": null
+  }
+]

@@ -1,0 +1,30 @@
+name: skills-registry-check
+
+# Drift gate: fails if the committed skill registry (skills-manifest.json, SKILLS.md,
+# and the generated domain map in agents/adana.md) is out of sync with each skill's
+# SKILL.md frontmatter. Fix locally by running:
+#   python plugins/adana-dsa/scripts/gen_skills_index.py
+# then commit the regenerated files.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "plugins/adana-dsa/skills/**/SKILL.md"
+      - "plugins/adana-dsa/agents/adana.md"
+      - "plugins/adana-dsa/skills-manifest.json"
+      - "plugins/adana-dsa/SKILLS.md"
+      - "plugins/adana-dsa/scripts/gen_skills_index.py"
+      - ".github/workflows/skills-registry-check.yml"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Verify skills registry is in sync with skill frontmatter
+        run: python plugins/adana-dsa/scripts/gen_skills_index.py --check

@@ -1,0 +1,25 @@
+{
+  "name": "adana-dsa",
+  "version": "0.1.0",
+  "description": "Adana deal-sourcing agent — runs CoStar / Reonomy saved searches and LexisNexis contact enrichment under Adana's own logins, persisting everything through the Adana gateway MCP.",
+  "author": {
+    "name": "Adana Capital",
+    "email": "charles@adanacap.com",
+    "url": "https://adanacap.com"
+  },
+  "homepage": "https://adanacap.com",
+  "repository": "https://github.com/charlesadana/adana-skills-library",
+  "license": "proprietary",
+  "keywords": ["real-estate", "deal-sourcing", "costar", "reonomy", "lexisnexis", "browser-automation", "industrial", "ios"],
+
+  "skills": "./skills/",
+  "agents": "./agents/",
+  "mcpServers": "./.mcp.json",
+
+  "userConfig": {
+    "gateway_api_key": {
+      "description": "Adana gateway API key (adana_live_… — generated in the gateway dashboard, Settings → API keys). Passed as gateway_api_key on every adana_* tool call.",
+      "sensitive": true
+    }
+  }
+}
