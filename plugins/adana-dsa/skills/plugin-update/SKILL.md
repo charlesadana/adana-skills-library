@@ -14,7 +14,7 @@ deps:
 
 # Plugin Update — Catch Existing Workspaces Up to Latest Plugin Version
 
-You are the upgrade agent for the Adana plugin. The user has already run `/adana-dsa:setup` at some earlier plugin version, and the plugin has since added new skills or changed requirements. Detect what's missing and fill **only the gaps** — never re-run steps that are already complete.
+You are the upgrade agent for the Adana plugin. The user has already run `/adana-dsa:adana-setup` at some earlier plugin version, and the plugin has since added new skills or changed requirements. Detect what's missing and fill **only the gaps** — never re-run steps that are already complete.
 
 This skill is **idempotent**. Running it twice in a row produces a clean "nothing to do" report on the second pass.
 
@@ -26,13 +26,13 @@ This skill is **idempotent**. Running it twice in a row produces a clean "nothin
 
 ## How this differs from setup
 
-| Aspect | `setup` | `plugin-update` |
+| Aspect | `adana-setup` | `plugin-update` |
 |---|---|---|
 | When | First time | After a plugin upgrade |
 | Greenfield | Yes — writes everything | No — fills gaps only |
 | Re-asks for known data | Yes | No — reuses what's on disk |
 
-If `CLAUDE.md` doesn't exist at the workspace root, exit and tell the user to run `/adana-dsa:setup` first.
+If `CLAUDE.md` doesn't exist at the workspace root, exit and tell the user to run `/adana-dsa:adana-setup` first.
 
 ---
 
@@ -81,17 +81,13 @@ Read `.claude/settings.local.json` at the workspace root. Check the `env` block:
 
 If `GATEWAY_API_KEY` is present, do a quick sanity check: verify it starts with `adana_live_` (prefix only — don't call the gateway yet).
 
-### 1b. Gateway MCP
+### 1b. Gateway connector
 
-Run `claude mcp list` and check whether `gateway` appears:
-
-```bash
-claude mcp list
-```
+Probe the gateway by attempting a low-cost call (`adana_log_run` with a dry-run flag). If the tool is unavailable or returns an auth error, the connector is not registered.
 
 | Item | Status |
 |---|---|
-| `gateway` MCP registered | present / missing |
+| `gateway` connector registered | present / missing |
 
 ### 1c. CLAUDE.md
 
@@ -148,21 +144,21 @@ Walk through each ❌ or ⏭ item. Skip anything already ✅. Accept "skip" at a
 
 ### 3a. GATEWAY_API_KEY missing
 
-Delegate to `/adana-dsa:setup` Step 2. Ask the user to paste the key; write it to `.claude/settings.local.json`.
+Delegate to `/adana-dsa:adana-setup` Step 2. Ask the user to paste the key; write it to `.claude/settings.local.json`.
 
-### 3b. Gateway MCP not registered
+### 3b. Gateway connector not registered
 
-Delegate to `/adana-dsa:setup` Step 3. Register the MCP, prompt restart if needed.
+Delegate to `/adana-dsa:adana-setup` Step 3. Walk the user through Settings → Connectors → Add custom connector.
 
 ### 3c. CLAUDE.md stale or missing
 
-Re-embed `agents/adana.md` using the same logic as `/adana-dsa:setup` Step 5. Read the current `adana.md`, strip frontmatter, write the block between `BEGIN/END` markers in `CLAUDE.md`, update the version stamp.
+Re-embed `agents/adana.md` using the same logic as `/adana-dsa:adana-setup` Step 5. Read the current `adana.md`, strip frontmatter, write the block between `BEGIN/END` markers in `CLAUDE.md`, update the version stamp.
 
 Show the user a diff of what's changing before writing. Never overwrite content outside the `BEGIN/END` markers.
 
 ### 3d. New skill requirements (future)
 
-When new skills are added that introduce new env vars or MCPs, add fill handlers here that match `/adana-dsa:setup` steps for those specific items. Document the requirement and the version it was introduced. Right now no fill handler is needed beyond 3a–3c.
+When new skills are added that introduce new env vars or MCPs, add fill handlers here that match `/adana-dsa:adana-setup` steps for those specific items. Document the requirement and the version it was introduced. Right now no fill handler is needed beyond 3a–3c.
 
 ---
 
@@ -171,7 +167,7 @@ When new skills are added that introduce new env vars or MCPs, add fill handlers
 Test only the items touched in Step 3.
 
 - **GATEWAY_API_KEY** — call `adana_log_run` with a dry-run test entry. If it returns 200, key is valid.
-- **Gateway MCP** — run `claude mcp list` again and confirm `gateway` is present.
+- **Gateway connector** — probe `adana_log_run` again and confirm the connector responds.
 - **CLAUDE.md** — read it back and confirm the version stamp matches `installed_version`.
 
 Show a result table:

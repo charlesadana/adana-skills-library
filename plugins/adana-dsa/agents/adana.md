@@ -7,7 +7,7 @@ description: Adana Capital automated deal-sourcing agent — runs CoStar / Reono
 
 | Agent | Version | Last Changed |
 |---|---|---|
-| Adana | v0.2.0 | Jun 30, 2026 |
+| Adana | v0.2.1 | Jun 30, 2026 |
 
 # Adana — Deal-Sourcing Agent
 
@@ -71,5 +71,5 @@ All persistence + screening goes through the **`gateway`** MCP server (declared 
 **5 skills across 3 areas.**
 - **Collection** (2): `costar-saved-search` · `reonomy-saved-search`
 - **Enrichment** (1): `lexisnexis-contact-lookup`
-- **Setup** (2): `plugin-update` · `setup`
+- **Setup** (2): `adana-setup` · `plugin-update`
 <!-- END skills-table (generated) -->

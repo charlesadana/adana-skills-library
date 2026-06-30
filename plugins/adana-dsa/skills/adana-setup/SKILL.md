@@ -1,11 +1,11 @@
 ---
-name: setup
+name: adana-setup
 description: >-
   First-time setup for the Adana deal-sourcing plugin — configure the gateway
-  API key, register the gateway MCP, confirm Claude in Chrome, and create the
-  workspace CLAUDE.md so adana.md loads automatically on every session.
+  API key, register the gateway connector, confirm Claude in Chrome, and create
+  the workspace CLAUDE.md so adana.md loads automatically on every session.
 area: Setup
-use_for: "Run once to wire up the Adana plugin in a new workspace: gateway API key, MCP registration, Claude in Chrome check, and CLAUDE.md creation."
+use_for: "Run once to wire up the Adana plugin in a new workspace: gateway API key, connector registration, Claude in Chrome check, and CLAUDE.md creation."
 deps:
   mcp: []
   gateway: []
@@ -22,12 +22,19 @@ Walk the user through each step in order. Confirm completion before moving to th
 - User says "set up", "setup", "configure", "install", or "first time"
 - Any skill errors because `GATEWAY_API_KEY` is missing or rejected
 
-## Step 1 — Verify you're in the right project
+## Step 1 — Cowork project
+
+All skill runs happen inside a **Cowork project**. This is required — setup cannot complete without an active project session.
 
 Ask the user:
-> Are you running this inside the Claude Code project you want to use for Adana day-to-day? Setup will create a `CLAUDE.md` here that loads the Adana agent automatically on every session.
+> Are you running this inside the Cowork project you want to use for Adana day-to-day? Setup will write config here that loads the Adana agent automatically on every session.
 
-If they say no, ask them to open the correct project first, then re-run `/adana-dsa:setup`.
+If they say no, ask them to:
+1. Look for **Projects** just below the chat input area in Cowork
+2. Click **"Create a new Project"** → **"Use an existing folder"** (point it at their Adana working folder)
+3. Open that project session, then re-run `/adana-dsa:adana-setup`
+
+**Do not continue until the user confirms they are inside the right project.**
 
 ## Step 2 — Gateway API key
 
@@ -46,23 +53,17 @@ Once they paste the key, write it to `.claude/settings.local.json` under `env`. 
 
 If the file doesn't exist, create it. Confirm: "Gateway API key saved."
 
-## Step 3 — Gateway MCP
+## Step 3 — Gateway connector
 
-The gateway must be registered as an MCP server so Claude can call `adana_*` tools. Check by running:
+The Adana gateway must be registered as a custom connector so Claude can call `adana_*` tools.
 
-```bash
-claude mcp list
-```
+Ask the user to add it in Cowork:
+1. Go to **Settings → Connectors → "Add custom connector"**
+2. **Name:** `gateway`
+3. **URL:** `https://gateway.adanacap.com/api/mcp`
+4. Click **Connect**
 
-If `gateway` is not in the list, register it:
-
-```bash
-claude mcp add gateway --url https://gateway.adanacap.com/api/mcp
-```
-
-Tell the user: "Restart Claude Code after this step, then re-run `/adana-dsa:setup` to continue from Step 4."
-
-If `gateway` is already registered, confirm and move on.
+Ask: "Have you added the gateway connector?" Wait for confirmation before moving on.
 
 ## Step 4 — Claude in Chrome
 
@@ -85,41 +86,57 @@ This is the step that makes the Adana agent load automatically on every session.
 
 ### 5a. Locate adana.md
 
-Find the absolute path to `agents/adana.md` in the adana-skills-library. It will be inside the plugin folder wherever the skills library is installed on this machine.
+Find the absolute path to `agents/adana.md`. In Cowork, start from `$CLAUDE_CONFIG_DIR` (the env var Cowork sets to point at the mounted plugin tree):
 
-### 5b. Read the content
+```python
+import os, glob
+
+config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+patterns = []
+if config_dir:
+    patterns.append(os.path.join(config_dir, "**/agents/adana.md"))
+patterns.append(os.path.expanduser("~/.claude/**/agents/adana.md"))
+
+found = [f for p in patterns for f in glob.glob(p, recursive=True)]
+adana_md_path = os.path.abspath(found[0]) if found else None
+
+if not adana_md_path:
+    raise RuntimeError("Could not locate agents/adana.md — ask the user for the full path.")
+```
+
+### 5b. Read and strip frontmatter
 
 ```python
 import re
 
-with open("<absolute_path_to_agents/adana.md>", encoding="utf-8") as f:
+with open(adana_md_path, encoding="utf-8") as f:
     content = f.read()
 
-# Strip YAML frontmatter
 body = re.sub(r'^---\s*\n.*?\n---\s*\n', '', content, count=1, flags=re.DOTALL).lstrip()
 
-# Extract version from Maintenance table
 version_match = re.search(r'\|\s*Adana\s*\|\s*(v[\S]+)\s*\|', content)
 version = version_match.group(1).strip() if version_match else "unknown"
 ```
 
 ### 5c. Write CLAUDE.md
 
-If `CLAUDE.md` already exists at the workspace root, check whether it already has an Adana block (look for `<!-- BEGIN agents/adana.md -->`). If yes, replace it. If no, append it. Never overwrite unrelated content.
+If `CLAUDE.md` already exists at the workspace root, check for an existing Adana block (`<!-- BEGIN agents/adana.md -->`). If found, replace it. If not, append. Never overwrite content outside the markers.
 
 ```python
 import datetime
 
 embed_date = datetime.date.today().isoformat()
 
-block = f"""<!-- BEGIN agents/adana.md (embedded by setup) -->
-<!-- adana.md version: {version} | Embedded: {embed_date} -->
-
-{body}
-<!-- END agents/adana.md -->"""
+block = (
+    f"<!-- BEGIN agents/adana.md (embedded by setup) -->\n"
+    f"<!-- adana.md version: {version} | Embedded: {embed_date} -->\n"
+    f"\n"
+    f"{body}\n"
+    f"<!-- END agents/adana.md -->"
+)
 ```
 
-If `CLAUDE.md` doesn't exist, create it with just the block. Show the user a preview of what will be written and confirm before writing.
+Show the user a preview before writing and confirm. If `CLAUDE.md` doesn't exist, create it with just the block.
 
 ### 5d. Verify
 
@@ -131,7 +148,7 @@ Read back `CLAUDE.md` and confirm the block is present and the version stamp mat
 
 Summarise what was configured:
 - Gateway API key saved to `.claude/settings.local.json`
-- Gateway MCP registered
+- Gateway connector registered
 - Claude in Chrome confirmed
 - CLAUDE.md created with Adana agent embedded
 

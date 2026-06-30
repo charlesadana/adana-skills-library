@@ -1,5 +1,5 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.2.0';
+const DEFAULT_VERSION = 'v0.2.1';
 const DEFAULT_DATE = 'Jun 30, 2026';
 
 // Export constants initially with default values
@@ -9,6 +9,15 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.2.1',
+    date: 'Jun 30, 2026',
+    changes: [
+      'Renamed setup skill to adana-setup',
+      'Fixed setup skill: replaced all "Claude Code" references with "Cowork"; replaced claude mcp add CLI command with Settings → Connectors → Add custom connector UI flow',
+      'Fixed plugin-update skill: replaced claude mcp list CLI check with adana_log_run probe; updated all /adana-dsa:setup references to /adana-dsa:adana-setup',
+    ],
+  },
   {
     version: 'v0.2.0',
     date: 'Jun 30, 2026',

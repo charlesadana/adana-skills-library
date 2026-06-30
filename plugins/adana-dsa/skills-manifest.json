@@ -61,9 +61,9 @@
     "version": null
   },
   {
-    "name": "plugin-update",
+    "name": "adana-setup",
     "area": "Setup",
-    "use_for": "Run after a git pull to detect and fill any gaps: missing env vars, unregistered MCPs, stale CLAUDE.md embed, new skill requirements.",
+    "use_for": "Run once to wire up the Adana plugin in a new workspace: gateway API key, connector registration, Claude in Chrome check, and CLAUDE.md creation.",
     "description": ">-",
     "deps": {
       "mcp": [],
@@ -74,9 +74,9 @@
     "version": null
   },
   {
-    "name": "setup",
+    "name": "plugin-update",
     "area": "Setup",
-    "use_for": "Run once to wire up the Adana plugin in a new workspace: gateway API key, MCP registration, Claude in Chrome check, and CLAUDE.md creation.",
+    "use_for": "Run after a git pull to detect and fill any gaps: missing env vars, unregistered MCPs, stale CLAUDE.md embed, new skill requirements.",
     "description": ">-",
     "deps": {
       "mcp": [],
