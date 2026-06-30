@@ -10,12 +10,12 @@ description: >-
   pull, refresh, or screen it — even casually like "run Montana through CoStar"
   or "pull the NEW PRODUCT search and tell me what fits". If the user mentions a
   CoStar saved search by name, this skill almost certainly applies.
-allowed-tools: Claude in Chrome browser tools (navigate, find, read_page, click, type, screenshot), mcp__gateway__adana_screen_costar, mcp__gateway__adana_ingest_costar_export
+allowed-tools: Claude in Chrome browser tools (navigate, find, read_page, click, type, screenshot), mcp__gateway__adana_screen_costar, mcp__gateway__adana_ingest_costar_export, mcp__gateway__adana_save_qualification
 area: Collection
-use_for: "Run a CoStar saved search, screen the grid (FAR/PLSF/PSFB via gateway), and persist deduped properties + broker contacts."
+use_for: "Run a CoStar saved search, screen the grid (FAR/PLSF/PSFB via gateway), persist deduped properties + broker contacts, and write back the qualification (score + why + buy-box checklist)."
 deps:
   mcp: ["Claude in Chrome"]
-  gateway: ["adana_screen_costar", "adana_ingest_costar_export"]
+  gateway: ["adana_screen_costar", "adana_ingest_costar_export", "adana_save_qualification"]
   files: []
   env: ["gateway_api_key"]
 ---
@@ -122,11 +122,58 @@ The gateway UPSERTs properties (dedup on normalized address), records a
 (flow1 → `sourced`; flow3 with no broker → `needs_enrichment`). Relay the
 returned `{run_id, found, new, updated}` so the user can confirm the data landed.
 
+## Step 6 — Qualify & write back (the recommendation)
+
+Screening (Step 4) only tells you whether the **price** clears the buy-box. The
+recommendation — a graded conviction score, the *why*, and the strategic buy-box
+checklist — is **yours to produce**: you have the full CoStar row, the listing,
+the brochure, and the map, none of which the gateway sees. Build one
+qualification per property you ingested and write it back with
+**`adana_save_qualification`**:
+
+```
+adana_save_qualification(
+  gateway_api_key: "${GATEWAY_API_KEY}",
+  items: [{
+    address_raw: "<same address you ingested>",    // or property_id
+    score: 1-10,                                     // your conviction, not the screen's 10/0
+    action: "PURSUE" | "REVIEW" | "PASS",
+    why: "<one short paragraph>",
+    checks: [
+      { "label": "Significant outdoor storage (stabilized yard)", "pass": true },
+      { "label": "Major highway access", "pass": true, "note": "I-10 / SH-146" },
+      { "label": "Price in $1-10M range", "pass": true },
+      { "label": "Near container seaport", "pass": true, "note": "~5 mi Bayport" },
+      { "label": "Near Class I railyard", "pass": true, "note": "UP ~6 mi" },
+      { "label": "Redevelopment / vacancy upside", "pass": false }
+    ],
+    screen: { far: 0.105, metric: "PLSF", value: 13.8, threshold: 23, band: "10-18%", pass: true }
+  }, ... ]
+)
+```
+
+Rules:
+- **Reuse the screen's math — never recompute it.** The `screen` block comes
+  straight from the `adana_screen_costar` result for that row (`metric`, `value`,
+  `threshold`, `band` as returned); set `far` to the **decimal** (`far_pct ÷ 100`,
+  so 10.5% → `0.105`). FAR/PLSF/PSFB are the gateway's to compute, not yours.
+- **Don't invent the location checks.** Mark a check `pass: true` only when the
+  listing / brochure / map actually supports it; otherwise `pass: false` with a
+  short `note`. A thin or unverifiable criterion is a real signal — fabricating
+  one is worse than leaving it false.
+- **`action` mirrors the screen by default, but you may override it on strategic
+  grounds** — e.g. a price near-miss that's a strong port-adjacent redevelopment
+  play can be `PURSUE` — as long as the `screen` block stays honest and the `why`
+  explains the override.
+- The gateway stores this verbatim; your overlay **supersedes the gateway's own
+  deterministic screen** on the dashboard card. Batch all rows into one call.
+
 ## Reporting back
 
-Tight summary: qualifier count + names, near-misses, no-price count, and the
-ingest counts (`new` / `updated`). Mention that no-price/no-broker rows were
-routed to enrichment (the LexisNexis skill picks them up).
+Tight summary: qualifier count + names, near-misses, no-price count, the ingest
+counts (`new` / `updated`), and how many properties you qualified (`saved`).
+Mention that no-price/no-broker rows were routed to enrichment (the LexisNexis
+skill picks them up).
 
 ## Edge cases
 

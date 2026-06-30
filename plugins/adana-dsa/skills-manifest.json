@@ -2,7 +2,7 @@
   {
     "name": "costar-saved-search",
     "area": "Collection",
-    "use_for": "Run a CoStar saved search, screen the grid (FAR/PLSF/PSFB via gateway), and persist deduped properties + broker contacts.",
+    "use_for": "Run a CoStar saved search, screen the grid (FAR/PLSF/PSFB via gateway), persist deduped properties + broker contacts, and write back the qualification (score + why + buy-box checklist).",
     "description": ">-",
     "deps": {
       "mcp": [
@@ -10,7 +10,8 @@
       ],
       "gateway": [
         "adana_screen_costar",
-        "adana_ingest_costar_export"
+        "adana_ingest_costar_export",
+        "adana_save_qualification"
       ],
       "files": [],
       "env": [
@@ -22,14 +23,15 @@
   {
     "name": "reonomy-saved-search",
     "area": "Collection",
-    "use_for": "Run a Reonomy saved search and persist deduped off-market properties + owner contact shells (flow2).",
+    "use_for": "Run a Reonomy saved search, persist deduped off-market properties + owner contact shells (flow2), and write back a judgment-led qualification.",
     "description": ">-",
     "deps": {
       "mcp": [
         "Claude in Chrome"
       ],
       "gateway": [
-        "adana_ingest_reonomy"
+        "adana_ingest_reonomy",
+        "adana_save_qualification"
       ],
       "files": [],
       "env": [
@@ -55,6 +57,32 @@
       "env": [
         "gateway_api_key"
       ]
+    },
+    "version": null
+  },
+  {
+    "name": "plugin-update",
+    "area": "Setup",
+    "use_for": "Run after a git pull to detect and fill any gaps: missing env vars, unregistered MCPs, stale CLAUDE.md embed, new skill requirements.",
+    "description": ">-",
+    "deps": {
+      "mcp": [],
+      "gateway": [],
+      "files": [],
+      "env": []
+    },
+    "version": null
+  },
+  {
+    "name": "setup",
+    "area": "Setup",
+    "use_for": "Run once to wire up the Adana plugin in a new workspace: gateway API key, MCP registration, Claude in Chrome check, and CLAUDE.md creation.",
+    "description": ">-",
+    "deps": {
+      "mcp": [],
+      "gateway": [],
+      "files": [],
+      "env": []
     },
     "version": null
   }

@@ -8,12 +8,12 @@ description: >-
   search or asks to "pull Reonomy", "run the off-market search", "get owners for
   [area]", or refresh Reonomy results. Drives the user's already-logged-in
   browser via Claude in Chrome.
-allowed-tools: Claude in Chrome browser tools (navigate, find, read_page, click, type, screenshot), mcp__gateway__adana_ingest_reonomy
+allowed-tools: Claude in Chrome browser tools (navigate, find, read_page, click, type, screenshot), mcp__gateway__adana_ingest_reonomy, mcp__gateway__adana_save_qualification
 area: Collection
-use_for: "Run a Reonomy saved search and persist deduped off-market properties + owner contact shells (flow2)."
+use_for: "Run a Reonomy saved search, persist deduped off-market properties + owner contact shells (flow2), and write back a judgment-led qualification."
 deps:
   mcp: ["Claude in Chrome"]
-  gateway: ["adana_ingest_reonomy"]
+  gateway: ["adana_ingest_reonomy", "adana_save_qualification"]
   files: []
   env: ["gateway_api_key"]
 ---
@@ -76,12 +76,38 @@ The gateway UPSERTs properties (dedup on normalized address), records a
 properties to **`needs_enrichment`** (owner email/phone are filled in later by
 the LexisNexis skill). Relay the returned `{run_id, found, new, updated}`.
 
+## Step 4 — Qualify & write back (the recommendation)
+
+Off-market Reonomy leads usually have **no list price**, so the FAR/PLSF/PSFB
+price screen can't run — the call here is **judgment**: does the site fit the
+Adana IOS buy-box on type, size, and location? Write your read back with
+**`adana_save_qualification`** (omit the `screen` block when there's no price):
+
+```
+adana_save_qualification(
+  gateway_api_key: "${GATEWAY_API_KEY}",
+  items: [{
+    address_raw: "<same address you ingested>",     // or property_id
+    score: 1-10,
+    action: "PURSUE" | "REVIEW" | "PASS",
+    why: "<one short paragraph — owner/asset/location fit, and that pricing is TBD>",
+    checks: [ { "label": "Significant outdoor storage (stabilized yard)", "pass": true, "note": "<acres>" }, ... ]
+  }, ... ]
+)
+```
+
+Same honesty rule as CoStar: assert a location check only when the Reonomy record
+or the map supports it — don't fabricate one. Pricing is unknown, so most
+off-market leads land **`REVIEW`** (pursue the owner for a number) unless the
+strategic fit is strong enough for `PURSUE`. The gateway stores it verbatim and
+surfaces it on the property card.
+
 ## Reporting back
 
-Tight summary: how many owners/properties captured, and the ingest counts
-(`new` / `updated`). Note that these are now queued for contact enrichment
-(the `lexisnexis-contact-lookup` skill picks them up via
-`adana_targets_needing_enrichment`).
+Tight summary: how many owners/properties captured, the ingest counts
+(`new` / `updated`), and how many you qualified (`saved`). Note that these are now
+queued for contact enrichment (the `lexisnexis-contact-lookup` skill picks them
+up via `adana_targets_needing_enrichment`).
 
 ## Edge cases
 
