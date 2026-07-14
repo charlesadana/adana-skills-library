@@ -1,5 +1,5 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.2.4';
+const DEFAULT_VERSION = 'v0.3.0';
 const DEFAULT_DATE = 'Jul 14, 2026';
 
 // Export constants initially with default values
@@ -9,6 +9,22 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.3.0',
+    date: 'Jul 14, 2026',
+    changes: [
+      'BREAKING — re-run /adana-dsa:adana-setup. Export replaces grid-scraping across both collection skills.',
+      'The collection skills did not work. costar-saved-search and reonomy-saved-search read the results grid row-by-row, which never completes on a real saved search. This was mandated by the spec (adana-dsa.md §8.1.3 "Scrape the results grid", §8.1.6 "No CSV/xlsx written") and was never live-tested — the design doc marked S3/S5 "(pending live run)".',
+      'costar-saved-search now exports via the Industrial SAVED layout (not the pre-defined one) as the docs/ref-skills baseline did for months, reads the xlsx, and sends raw asking_price/building_sf/lot_size_acres to adana_screen_costar. transform.js is unnecessary — the layout already carries the raw columns the gateway derives FAR/PLSF/PSFB from.',
+      'reonomy-saved-search now exports too. Its export UI steps are UNVERIFIED (no ref-skill exists for Reonomy) and are marked as such — read the page and adapt on first run.',
+      'New: single exports/ folder as Chrome\'s download location, plus lexisnexis/ working dir. One folder, not one per source — Chrome has a single global download location and cannot be set per-site. adana-setup Step 5 creates them, points Chrome at exports/, and verifies the round-trip (a folder Chrome is not actually pointing at looks identical from the sandbox).',
+      'CLAUDE.md now carries ## Workspace Defaults + ## Workspace Structure, so a scheduled run resolves the folder paths with zero lookups.',
+      'lexisnexis-contact-lookup: FIXED a path to contacting the wrong person. The SmartLinx phone table lists relatives\' numbers alongside the subject\'s; the gateway takes phones[0] as the contact\'s only mobile and later bulk-loads it into the Instantly campaign. Phones are now ordered by listing name so index 0 is the subject\'s own number, and flagged when none match.',
+      'lexisnexis-contact-lookup: restored the ref-skill\'s resume mechanism (lexisnexis/results.json, appended per person) — a 100-contact run that died at #97 previously lost all 97. Also restored the output CSV and optional spreadsheet input.',
+      'costar-saved-search: brokers now come from the export when the layout carries them, else the brochure. The gateway\'s test is literally hasBroker = !!broker.email, so a broker without an email is no broker at all — such rows fall through to enrichment, which is the correct destination.',
+      'agents/adana.md: dropped the "No CSV/xlsx, no downloads" hard rule that forbade the fix; added the phones[0] hazard and the Chrome download-location prerequisite.',
+    ],
+  },
   {
     version: 'v0.2.4',
     date: 'Jul 14, 2026',

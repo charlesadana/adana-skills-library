@@ -2,7 +2,7 @@
   {
     "name": "costar-saved-search",
     "area": "Collection",
-    "use_for": "Run a CoStar saved search, screen the grid (FAR/PLSF/PSFB via gateway), persist deduped properties + broker contacts, and write back the qualification (score + why + buy-box checklist).",
+    "use_for": "Run a CoStar saved search, export it (Industrial saved layout), screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + broker contacts, and write back the qualification (score + why + buy-box checklist).",
     "description": ">-",
     "deps": {
       "mcp": [
@@ -13,9 +13,12 @@
         "adana_ingest_costar_export",
         "adana_save_qualification"
       ],
-      "files": [],
+      "files": [
+        "exports/CostarExport*.xlsx (read)"
+      ],
       "env": [
-        "gateway_api_key"
+        "gateway_api_key",
+        "ADANA_EXPORT_DIR"
       ]
     },
     "version": null
@@ -23,7 +26,7 @@
   {
     "name": "reonomy-saved-search",
     "area": "Collection",
-    "use_for": "Run a Reonomy saved search, persist deduped off-market properties + owner contact shells (flow2), and write back a judgment-led qualification.",
+    "use_for": "Run a Reonomy saved search, export it, persist deduped off-market properties + owner contact shells (flow2), and write back a judgment-led qualification.",
     "description": ">-",
     "deps": {
       "mcp": [
@@ -33,9 +36,12 @@
         "adana_ingest_reonomy",
         "adana_save_qualification"
       ],
-      "files": [],
+      "files": [
+        "exports/*.csv (read)"
+      ],
       "env": [
-        "gateway_api_key"
+        "gateway_api_key",
+        "ADANA_EXPORT_DIR"
       ]
     },
     "version": null
@@ -43,7 +49,7 @@
   {
     "name": "lexisnexis-contact-lookup",
     "area": "Enrichment",
-    "use_for": "Pull pending contacts from the gateway, look up phones/emails via LexisNexis SmartLinx, and write the results back.",
+    "use_for": "Pull pending contacts from the gateway (or a spreadsheet), look up phones/emails via LexisNexis SmartLinx, write the results back, and produce a CSV.",
     "description": ">-",
     "deps": {
       "mcp": [
@@ -53,9 +59,13 @@
         "adana_targets_needing_enrichment",
         "adana_save_contact_lookups"
       ],
-      "files": [],
+      "files": [
+        "lexisnexis/results.json (read+write)",
+        "lexisnexis/output_<date>.csv (write)"
+      ],
       "env": [
-        "gateway_api_key"
+        "gateway_api_key",
+        "LEXISNEXIS_DIR"
       ]
     },
     "version": null
@@ -63,7 +73,7 @@
   {
     "name": "adana-setup",
     "area": "Setup",
-    "use_for": "Run once to wire up the Adana plugin in a new workspace: gateway API key, connector registration, Claude in Chrome check, and CLAUDE.md creation.",
+    "use_for": "Run once to wire up the Adana plugin in a new workspace: gateway API key, connector registration, Claude in Chrome check, export folders + Chrome download location, and CLAUDE.md creation.",
     "description": ">-",
     "deps": {
       "mcp": [],
@@ -76,7 +86,7 @@
   {
     "name": "plugin-update",
     "area": "Setup",
-    "use_for": "Run after a git pull to detect and fill any gaps: missing env vars, unregistered MCPs, stale CLAUDE.md embed, new skill requirements.",
+    "use_for": "Run after a git pull to detect and fill any gaps: missing env vars, unregistered connectors, export folders + Chrome download location, stale CLAUDE.md embed, new skill requirements.",
     "description": ">-",
     "deps": {
       "mcp": [],

@@ -2,10 +2,11 @@
 name: adana-setup
 description: >-
   First-time setup for the Adana deal-sourcing plugin — configure the gateway
-  API key, register the gateway connector, confirm Claude in Chrome, and create
+  API key, register the gateway connector, confirm Claude in Chrome, create the
+  export/working folders and point Chrome's download location at them, and write
   the workspace CLAUDE.md so adana.md loads automatically on every session.
 area: Setup
-use_for: "Run once to wire up the Adana plugin in a new workspace: gateway API key, connector registration, Claude in Chrome check, and CLAUDE.md creation."
+use_for: "Run once to wire up the Adana plugin in a new workspace: gateway API key, connector registration, Claude in Chrome check, export folders + Chrome download location, and CLAUDE.md creation."
 deps:
   mcp: []
   gateway: []
@@ -57,7 +58,7 @@ Once they paste the key, write it to `.claude/settings.local.json` at the worksp
 
 If the file doesn't exist, create it. Confirm: "Gateway API key saved."
 
-This file is what the skills actually read at runtime — via the `load_credentials()` snippet that Step 5 embeds into `CLAUDE.md`. Scheduled runs do not inject env vars automatically, so **both halves are required**: the key here, and the loader there. Setting one without the other leaves the Monday collection run with no `GATEWAY_API_KEY`.
+This file is what the skills actually read at runtime — via the `load_credentials()` snippet that Step 6 embeds into `CLAUDE.md`. Scheduled runs do not inject env vars automatically, so **both halves are required**: the key here, and the loader there. Setting one without the other leaves the Monday collection run with no `GATEWAY_API_KEY`.
 
 ## Step 3 — Gateway connector
 
@@ -86,11 +87,73 @@ Also confirm they know each skill needs the relevant source already signed in be
 | `reonomy-saved-search` | Reonomy — `app.reonomy.com` |
 | `lexisnexis-contact-lookup` | LexisNexis — `advance.lexis.com` (Public Records access) |
 
-## Step 5 — Create workspace CLAUDE.md
+## Step 5 — Project working folders + Chrome download location
+
+The collection skills **export** from CoStar and Reonomy rather than scraping the results grid — a grid read never completes on a real saved search. That means CoStar's export has to land somewhere the skill can read it.
+
+This is the one step with a foot in two worlds: **Chrome runs on the user's machine; the skill runs in the Cowork sandbox.** The project folder is visible to both, so that's where the export goes.
+
+### 5a. Create the folders
+
+Create these under the project root (cwd — the same folder that holds `CLAUDE.md` and `.claude/`):
+
+```python
+import os
+for d in ("exports", "lexisnexis"):
+    os.makedirs(d, exist_ok=True)
+```
+
+```
+exports/      — every browser download lands here: CoStar .xlsx, Reonomy .csv
+lexisnexis/   — results.json (resume), output_<date>.csv, optional input sheet
+```
+
+**One export folder, not one per source.** Chrome has a *single* global download location — it cannot be set per-site. So both CoStar and Reonomy exports land in `exports/`, and the skills tell them apart by filename (`CostarExport*.xlsx` vs Reonomy's `.csv`).
+
+### 5b. Record the paths
+
+Write them into `.claude/settings.local.json` under `env`. Read the file first and preserve every other key — only add or update these:
+
+```json
+{
+  "env": {
+    "ADANA_EXPORT_DIR": "exports",
+    "LEXISNEXIS_DIR": "lexisnexis"
+  }
+}
+```
+
+They are also written into `CLAUDE.md` under `## Workspace Defaults` in Step 6 — that copy is what a scheduled run reads with zero lookups. Both are required; `settings.local.json` is the fallback.
+
+### 5c. Point Chrome at the export folder
+
+Get the **host-side absolute path** to the project's `exports/` — the path as the user's own machine sees it, not the sandbox path. Ask them for it if you can't determine it (in Cowork the project was created from an existing folder, so they know where it is).
+
+Then:
+> In Chrome: **Settings → Downloads → Location** → set it to `<host path>/exports`
+>
+> Also make sure **"Ask where to save each file" is OFF.** That toggle opens a native operating-system save dialog, which is not a web page — Claude cannot click it, and it would hang the scheduled Monday run forever.
+
+**This is a global Chrome setting**, so everything they download from now on lands there — not just Adana exports. That's the trade for the export working unattended. Say so plainly; don't let them discover it later.
+
+### 5d. Confirm the round-trip
+
+Do not take this on trust — it is the single most likely thing to be silently wrong, and it fails on a Monday morning with nobody watching.
+
+Ask the user to download any small file in Chrome. Then check that it appears in the export folder from the sandbox:
+
+```python
+import os
+print(os.listdir(os.environ.get("ADANA_EXPORT_DIR", "exports")))
+```
+
+If the file isn't there, Chrome's download location is pointing at a folder the sandbox can't see. Stop and fix it before continuing — every collection run depends on this.
+
+## Step 6 — Create workspace CLAUDE.md
 
 This is the step that makes the Adana agent load automatically on every session. Read `agents/adana.md` from the adana-skills-library, strip its YAML frontmatter, and embed it into `CLAUDE.md` at the workspace root.
 
-### 5a. Locate adana.md
+### 6a. Locate adana.md
 
 The agent definition ships with the plugin. The skill runs inside the **Cowork sandbox** (Ubuntu Linux VM, regardless of host OS), so the canonical search location is `$CLAUDE_CONFIG_DIR/**/agents/adana.md`. The host-OS patterns are fallbacks for the rare case this runs outside Cowork.
 
@@ -134,7 +197,7 @@ adana_md_path = user_path
 adana_md_content = open(adana_md_path, encoding="utf-8").read()
 ```
 
-### 5b. Strip frontmatter and extract the version
+### 6b. Strip frontmatter and extract the version
 
 Strip the YAML frontmatter — it is a plugin-loader directive and has no meaning inside `CLAUDE.md`:
 
@@ -149,9 +212,9 @@ version_date = version_match.group(2).strip() if version_match else "unknown"
 embed_date = datetime.date.today().isoformat()
 ```
 
-### 5c. Write CLAUDE.md
+### 6c. Write CLAUDE.md
 
-Build the workspace block below and write it to `CLAUDE.md` at the workspace root. Substitute `{BODY}` (the stripped `adana.md` body from 5b), `{version}`, `{version_date}`, and `{embed_date}`.
+Build the workspace block below and write it to `CLAUDE.md` at the workspace root. Substitute `{BODY}` (the stripped `adana.md` body from 6b), `{version}`, `{version_date}`, and `{embed_date}`.
 
 We embed the **full content** of `agents/adana.md` rather than a path reference, so the workspace is self-contained — scheduled runs and fresh clones still get the agent identity, because Claude auto-loads `CLAUDE.md` at session start.
 
@@ -193,6 +256,31 @@ Scheduled and automated runs do **not** automatically inject environment variabl
     load_credentials()
 
 Run this **before** reading `GATEWAY_API_KEY`. Every `adana_*` tool call takes it as its first argument. If it is still missing after this step, stop and tell the user to re-run `/adana-dsa:adana-setup` — do not proceed and do not silently skip persistence.
+
+---
+
+## Workspace Defaults
+
+Hardcoded here at setup time so any session — including a scheduled run — has them immediately, with no env lookup. They are also mirrored into `.claude/settings.local.json` `env` as a fallback.
+
+- **Exports:** `exports/` (env: `ADANA_EXPORT_DIR`) — **Chrome's download location points here.** Both CoStar and Reonomy exports land in this one folder; Chrome has only a single global download location, so they are told apart by filename.
+- **LexisNexis working dir:** `lexisnexis/` (env: `LEXISNEXIS_DIR`)
+
+**Fallback rule:** if a value above looks empty or stale (e.g. this `CLAUDE.md` was copied from another workspace), run the credential loader and read from env instead:
+
+    export_dir = os.environ.get("ADANA_EXPORT_DIR", "exports")
+
+## Workspace Structure
+
+    exports/            — Chrome's download location; every export lands here
+      ├─ CostarExport*.xlsx   — CoStar (Industrial saved layout)
+      └─ *.csv                — Reonomy
+    lexisnexis/
+      ├─ results.json         — per-person lookup results; resume point for a failed batch
+      └─ output_<date>.csv    — the enrichment deliverable
+    .claude/settings.local.json  — GATEWAY_API_KEY + the folder paths above
+
+All paths are **relative to the project root** (cwd). Nothing here is the source of truth — the gateway is. These are working artifacts, and it is safe to delete them between runs.
 ````
 
 **If `CLAUDE.md` already exists:**
@@ -204,15 +292,16 @@ Run this **before** reading `GATEWAY_API_KEY`. Every `adana_*` tool call takes i
 
 Show the user a unified diff before writing.
 
-### 5d. Verify
+### 6d. Verify
 
 Read back `CLAUDE.md` and confirm:
 - the `BEGIN`/`END` markers are present and the version stamp matches `adana.md`'s Maintenance version
 - the `## Credential Loading` section with the `load_credentials()` snippet is present
+- the `## Workspace Defaults` and `## Workspace Structure` sections are present and name the three folders
 
-> ✅ CLAUDE.md created — the Adana agent and the credential loader will load automatically on every session, including scheduled runs.
+> ✅ CLAUDE.md created — the Adana agent, the credential loader, and the folder paths will load automatically on every session, including scheduled runs.
 
-## Step 6 — Schedule weekly collection
+## Step 7 — Schedule weekly collection
 
 Collection runs every **Monday** — CoStar → Reonomy → LexisNexis. Create the scheduled task now with Cowork's own scheduler.
 
@@ -243,7 +332,8 @@ Summarise what was configured:
 - Gateway API key saved to `.claude/settings.local.json`
 - Gateway connector registered
 - Claude in Chrome confirmed
-- CLAUDE.md created — Adana agent embedded + credential loader
+- Working folders created (`exports/`, `lexisnexis/`); Chrome's download location points at `exports/` (round-trip verified)
+- CLAUDE.md created — Adana agent + credential loader + workspace defaults
 - Weekly collection scheduled for Mondays
 
 The pipeline is live. Properties flow in Monday → qualify Tuesday (gateway cron) → Gate 1 review → outreach.

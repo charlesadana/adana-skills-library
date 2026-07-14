@@ -4,7 +4,7 @@ description: >-
   Catch an existing Adana workspace up to the latest plugin version — detects
   gaps since the last setup run and fills only what's missing (idempotent).
 area: Setup
-use_for: "Run after a git pull to detect and fill any gaps: missing env vars, unregistered MCPs, stale CLAUDE.md embed, new skill requirements."
+use_for: "Run after a git pull to detect and fill any gaps: missing env vars, unregistered connectors, export folders + Chrome download location, stale CLAUDE.md embed, new skill requirements."
 deps:
   mcp: []
   gateway: []
@@ -40,7 +40,7 @@ If `CLAUDE.md` doesn't exist at the workspace root, exit and tell the user to ru
 
 Read the **installed** plugin version from `agents/adana.md` (the Maintenance table `Version` column). Then read the **last-applied** version from the `CLAUDE.md` stamp at the workspace root.
 
-Locate `agents/adana.md` with the same Cowork-first search `adana-setup` Step 5a uses — `$CLAUDE_CONFIG_DIR` glob, then host-OS fallbacks, then ask the user for an absolute path.
+Locate `agents/adana.md` with the same Cowork-first search `adana-setup` Step 6a uses — `$CLAUDE_CONFIG_DIR` glob, then host-OS fallbacks, then ask the user for an absolute path.
 
 ```python
 import glob, os, re
@@ -94,8 +94,26 @@ Read `.claude/settings.local.json` (**search up from cwd** — same lookup the `
 | Env var | Required since | Status |
 |---|---|---|
 | `GATEWAY_API_KEY` | v0.1.0 | present / missing |
+| `ADANA_EXPORT_DIR` | v0.3.0 | present / missing |
+| `LEXISNEXIS_DIR` | v0.3.0 | present / missing |
 
 If `GATEWAY_API_KEY` is present, do a quick sanity check: verify it starts with `adana_live_` (prefix only — don't call the gateway yet).
+
+### 1a-2. Working folders + Chrome download location (v0.3.0)
+
+v0.3.0 replaced grid-scraping with **exports** — the old approach never completed on a real saved search. That makes the export folder load-bearing.
+
+| Item | Required since | Status |
+|---|---|---|
+| `exports/` exists | v0.3.0 | present / missing |
+| `lexisnexis/` exists | v0.3.0 | present / missing |
+| Chrome's download location points at `exports/` | v0.3.0 | **ask the user — cannot be probed** |
+
+The Chrome setting lives on the user's machine, not in the sandbox — there is no way to read it from here. Ask:
+
+> Is Chrome's download location (Settings → Downloads → Location) set to this project's `exports/` folder, with "Ask where to save each file" turned **off**?
+
+**This is the gap most likely to be silently wrong**, and it fails on a Monday morning with nobody watching: CoStar exports fine, the file lands in the user's normal Downloads folder, and the skill sees an empty directory.
 
 ### 1b. Gateway connector
 
@@ -116,6 +134,8 @@ Check `CLAUDE.md` at the workspace root:
 | Block uses the current `(embedded by adana-setup)` marker | v0.2.3 | current / **legacy** |
 | Contains `## Agent Identity` heading | v0.2.3 | present / missing |
 | Contains `## Credential Loading` block with the `load_credentials()` snippet | v0.2.3 | present / missing |
+| Contains `## Workspace Defaults` naming the folders | v0.3.0 | present / missing |
+| Contains `## Workspace Structure` | v0.3.0 | present / missing |
 | Version stamp matches installed version | v0.2.0 | match / stale |
 
 A stale stamp means the CLAUDE.md was written at an older version and needs refreshing — the embedded `adana.md` body may be out of date.
@@ -126,7 +146,15 @@ A stale stamp means the CLAUDE.md was written at an older version and needs refr
 
 ### 1d. New skill requirements
 
-For each skill in `skills-manifest.json`, check whether its `deps.env` and `deps.mcp` entries are already satisfied. Right now all three operational skills share the same requirements (`GATEWAY_API_KEY` + Claude in Chrome), so this reduces to checking 1a and 1b. As new skills are added with different deps, add rows here.
+For each skill in `skills-manifest.json`, check whether its `deps.env`, `deps.mcp` and `deps.files` entries are satisfied. As of v0.3.0:
+
+| Skill | Needs | Checked in |
+|---|---|---|
+| `costar-saved-search` | `GATEWAY_API_KEY`, `ADANA_EXPORT_DIR`, Chrome download location, Claude in Chrome | 1a, 1a-2, 1b |
+| `reonomy-saved-search` | `GATEWAY_API_KEY`, `ADANA_EXPORT_DIR`, Chrome download location, Claude in Chrome | 1a, 1a-2, 1b |
+| `lexisnexis-contact-lookup` | `GATEWAY_API_KEY`, `LEXISNEXIS_DIR`, Claude in Chrome | 1a, 1a-2, 1b |
+
+As new skills are added with different deps, add rows here.
 
 ### 1e. Scheduled task
 
@@ -146,27 +174,35 @@ Show a compact summary before doing anything. Example format:
 
 ```
 [adana-dsa] Plugin Update — Gap Report
-Plugin version: v0.1.0 → v0.2.0
+Plugin version: v0.2.2 → v0.3.0
 
 Env vars
   ✅ GATEWAY_API_KEY
+  ❌ ADANA_EXPORT_DIR / LEXISNEXIS_DIR   (new in v0.3.0)
 
 Connector
   ✅ gateway registered
 
+Working folders
+  ❌ exports/ · lexisnexis/ — not created
+  ❓ Chrome download location — needs your confirmation
+
 CLAUDE.md
-  ⚠️  Legacy block shape (embedded by setup) — pre-v0.2.3, rebuild needed
-  ❌ Agent Identity heading missing
-  ❌ Credential Loading block missing — scheduled runs will have no GATEWAY_API_KEY
+  ⚠️  Version stamp stale (v0.2.2 embedded, v0.3.0 installed)
+  ❌ Workspace Defaults / Workspace Structure missing (new in v0.3.0)
 
 Scheduled tasks
-  ❌ Adana · Weekly Collection — not found in Cowork
+  ✅ Adana · Weekly Collection
 
-New skills since v0.1.0
-  ✅ adana-setup, costar-saved-search, reonomy-saved-search, lexisnexis-contact-lookup
-  (no new requirements — existing GATEWAY_API_KEY covers all)
+Skills changed in v0.3.0
+  ⚠️  costar-saved-search, reonomy-saved-search — now EXPORT instead of scraping
+      the results grid (the old approach never completed on a real search).
+      Requires the export folder + Chrome download location above.
+  ⚠️  lexisnexis-contact-lookup — now resumable via lexisnexis/results.json,
+      and orders phones by listing name so a relative's number can't become the
+      primary contact.
 
-→ 1 required gap · 1 stale item · ready to refresh?
+→ 4 required gaps · 1 stale item · ready to fix?
 ```
 
 Ask:
@@ -187,6 +223,12 @@ Delegate to `/adana-dsa:adana-setup` Step 2. Ask the user to paste the key; writ
 ### 3b. Gateway connector not registered
 
 Delegate to `/adana-dsa:adana-setup` Step 3. Walk the user through Settings → Connectors → Add custom connector.
+
+### 3b-2. Working folders / Chrome download location missing (v0.3.0)
+
+Delegate to `/adana-dsa:adana-setup` Step 5 in full — create the two folders, write the two env vars, walk the user through Chrome → Settings → Downloads → Location, and **run the round-trip check** (have them download a file, then confirm it appears in `exports/` from the sandbox).
+
+Do not skip the round-trip check just because the folders exist. A folder that exists but that Chrome isn't pointing at looks identical from here, and is exactly the failure that breaks the Monday run.
 
 ### 3c. CLAUDE.md
 
@@ -225,16 +267,16 @@ if "<!-- BEGIN agents/adana.md (embedded by adana-setup) -->" in claude_md:
 # Case 2 — LEGACY format (v0.2.0–v0.2.2): marker said "(embedded by setup)", there was no
 # "## Agent Identity" heading and no Credential Loading section. Such a workspace has no
 # credential loader, so its scheduled runs cannot authenticate. Rebuild it from scratch via
-# the full adana-setup Step 5c workspace block — do NOT just swap the marker.
+# the full adana-setup Step 6c workspace block — do NOT just swap the marker.
 elif "<!-- BEGIN agents/adana.md (embedded by setup) -->" in claude_md:
     claude_md_new = re.sub(
         r'<!-- BEGIN agents/adana\.md \(embedded by setup\) -->.*?<!-- END agents/adana\.md -->',
-        lambda m: "__ADANA_FULL_WORKSPACE_BLOCK__",   # full Step 5c block, not just new_block
+        lambda m: "__ADANA_FULL_WORKSPACE_BLOCK__",   # full Step 6c block, not just new_block
         claude_md, count=1, flags=re.DOTALL,
     )
 
 # Case 3 — markers absent: do not partial-write here. Fall through to "missing entirely"
-# and PREPEND the full Step 5c workspace block above all existing content.
+# and PREPEND the full Step 6c workspace block above all existing content.
 else:
     claude_md_new = claude_md
 
@@ -243,8 +285,9 @@ if claude_md_new != claude_md:
 ```
 
 **Then patch any remaining gaps:**
-- **Missing entirely** → create from scratch via the full `adana-setup` Step 5c flow.
-- **Missing `## Credential Loading` block** → insert it **directly under the Agent Identity block**, verbatim from `adana-setup` Step 5c. Not at end-of-file — it must be adjacent to the identity it serves.
+- **Missing entirely** → create from scratch via the full `adana-setup` Step 6c flow.
+- **Missing `## Credential Loading` block** → insert it **directly under the Agent Identity block**, verbatim from `adana-setup` Step 6c. Not at end-of-file — it must be adjacent to the identity it serves.
+- **Missing `## Workspace Defaults` / `## Workspace Structure`** (pre-v0.3.0) → append both, verbatim from `adana-setup` Step 6c, naming `exports/` and `lexisnexis/`. Without them a scheduled run has no folder paths in context and must fall back to the env vars.
 
 Show the user a unified diff before writing. Never overwrite content outside the managed markers.
 
@@ -252,7 +295,7 @@ Show the user a unified diff before writing. Never overwrite content outside the
 
 ### 3d. Scheduled task missing
 
-Delegate to `/adana-dsa:adana-setup` Step 6. Invoke `/schedule` to recreate `Adana · Weekly Collection` (Weekly, Monday, 9 AM default).
+Delegate to `/adana-dsa:adana-setup` Step 7. Invoke `/schedule` to recreate `Adana · Weekly Collection` (Weekly, Monday, 9 AM default).
 
 ### 3e. New skill requirements (future)
 
@@ -266,7 +309,9 @@ Test only the items touched in Step 3.
 
 - **GATEWAY_API_KEY** — call `adana_log_run` with a dry-run test entry. If it returns 200, key is valid.
 - **Gateway connector** — probe `adana_log_run` again and confirm the connector responds.
-- **CLAUDE.md** — read it back and confirm the version stamp matches `installed_version`, and that the `## Credential Loading` block with `load_credentials()` is present.
+- **CLAUDE.md** — read it back and confirm the version stamp matches `installed_version`, and that `## Credential Loading`, `## Workspace Defaults` and `## Workspace Structure` are all present.
+- **Working folders** — confirm both exist and both env vars are set.
+- **Chrome download location** — run the round-trip check: have the user download any small file, then confirm it appears in `exports/` from the sandbox (`os.listdir("exports")`). Asking is not enough; this is the one that silently breaks the scheduled run.
 - **Scheduled task** — ask the user to confirm `Adana · Weekly Collection` now appears in Cowork → Scheduled.
 
 Show a result table:
