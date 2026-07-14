@@ -1,5 +1,5 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.2.3';
+const DEFAULT_VERSION = 'v0.2.4';
 const DEFAULT_DATE = 'Jul 14, 2026';
 
 // Export constants initially with default values
@@ -9,6 +9,18 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.2.4',
+    date: 'Jul 14, 2026',
+    changes: [
+      'Aligned the CLAUDE.md embed with brand-setup Step 9 / plugin-update Step 3h exactly — v0.2.3 had diverged in three ways',
+      'adana-setup 5c: when markers are absent, PREPEND the workspace block (was: append) — the agent identity must lead the file',
+      'Legacy migration: v0.2.0–v0.2.2 wrote a bare block marked "(embedded by setup)" with no ## Agent Identity heading and no Credential Loading section. Both skills now detect that marker and rebuild the block from scratch rather than swapping the marker — such workspaces cannot authenticate on scheduled runs',
+      'plugin-update 3c: replaced prose with the explicit re-embed code, including the lambda m: new_block guard that stops re.sub from interpreting backslashes in the embedded body',
+      'plugin-update 1c: gap report now detects the legacy shape and the missing Agent Identity heading',
+      'Credential Loading block is inserted directly under Agent Identity, not appended at end-of-file',
+    ],
+  },
   {
     version: 'v0.2.3',
     date: 'Jul 14, 2026',

@@ -113,12 +113,16 @@ Check `CLAUDE.md` at the workspace root:
 |---|---|---|
 | File exists | v0.2.0 | present / missing |
 | Contains `<!-- BEGIN agents/adana.md` block | v0.2.0 | present / missing |
+| Block uses the current `(embedded by adana-setup)` marker | v0.2.3 | current / **legacy** |
+| Contains `## Agent Identity` heading | v0.2.3 | present / missing |
 | Contains `## Credential Loading` block with the `load_credentials()` snippet | v0.2.3 | present / missing |
 | Version stamp matches installed version | v0.2.0 | match / stale |
 
 A stale stamp means the CLAUDE.md was written at an older version and needs refreshing — the embedded `adana.md` body may be out of date.
 
-**A missing Credential Loading block is a required gap, not cosmetic.** Scheduled runs do not inject env vars from `.claude/settings.local.json`. Without the loader, the Monday collection run starts with no `GATEWAY_API_KEY` and every `adana_*` call fails. Any workspace set up before v0.2.3 has this gap.
+**A missing Credential Loading block is a required gap, not cosmetic.** Scheduled runs do not inject env vars from `.claude/settings.local.json`. Without the loader, the Monday collection run starts with no `GATEWAY_API_KEY` and every `adana_*` call fails.
+
+**Legacy shape (v0.2.0–v0.2.2).** Those versions wrote a bare block marked `<!-- BEGIN agents/adana.md (embedded by setup) -->` — `setup`, not `adana-setup` — with no `## Agent Identity` heading and no Credential Loading section. Detecting that marker means all three rows above are gaps at once, and the workspace's scheduled runs cannot authenticate. Step 3c rebuilds it from scratch rather than swapping the marker.
 
 ### 1d. New skill requirements
 
@@ -151,7 +155,8 @@ Connector
   ✅ gateway registered
 
 CLAUDE.md
-  ⚠️  Version stamp stale (v0.1.0 embedded, v0.2.0 installed) — refresh needed
+  ⚠️  Legacy block shape (embedded by setup) — pre-v0.2.3, rebuild needed
+  ❌ Agent Identity heading missing
   ❌ Credential Loading block missing — scheduled runs will have no GATEWAY_API_KEY
 
 Scheduled tasks
@@ -187,10 +192,59 @@ Delegate to `/adana-dsa:adana-setup` Step 3. Walk the user through Settings → 
 
 **Always re-embed the full `agents/adana.md` body between the `BEGIN`/`END` markers — unconditionally, every run, regardless of whether any other CLAUDE.md gap was found.** Refreshing the stamp comment alone is wrong: after a `git pull` that adds skills or changes the gateway rules, the stamp would read the new version while the embedded body still describes the old one. Always replace the body too.
 
-Use the same logic as `/adana-dsa:adana-setup` Step 5 — locate `adana.md`, strip frontmatter, rebuild the block, update the version stamp.
+```python
+import glob, os, re, datetime
+
+# adana_md_path / adana_md were already resolved in Step 0 — reuse them.
+body = re.sub(r'^---\s*\n.*?\n---\s*\n', '', adana_md, count=1, flags=re.DOTALL).lstrip()
+
+version_match = re.search(r'\|\s*Adana\s*\|\s*(v[\S]+)\s*\|\s*([^|\n]+)\s*\|', adana_md)
+version = version_match.group(1).strip() if version_match else "unknown"
+version_date = version_match.group(2).strip() if version_match else "unknown"
+embed_date = datetime.date.today().isoformat()
+
+new_block = (
+    f"<!-- BEGIN agents/adana.md (embedded by adana-setup) -->\n"
+    f"<!-- adana.md version: {version} | Last Changed: {version_date} | Embedded: {embed_date} -->\n"
+    f"\n"
+    f"{body}\n"
+    f"\n"
+    f"<!-- END agents/adana.md -->"
+)
+
+claude_md = open("CLAUDE.md", encoding="utf-8").read()
+
+# Case 1 — current format: replace everything between (and including) the markers.
+if "<!-- BEGIN agents/adana.md (embedded by adana-setup) -->" in claude_md:
+    claude_md_new = re.sub(
+        r'<!-- BEGIN agents/adana\.md \(embedded by adana-setup\) -->.*?<!-- END agents/adana\.md -->',
+        lambda m: new_block,   # lambda avoids re.sub's backslash interpretation in `body`
+        claude_md, count=1, flags=re.DOTALL,
+    )
+
+# Case 2 — LEGACY format (v0.2.0–v0.2.2): marker said "(embedded by setup)", there was no
+# "## Agent Identity" heading and no Credential Loading section. Such a workspace has no
+# credential loader, so its scheduled runs cannot authenticate. Rebuild it from scratch via
+# the full adana-setup Step 5c workspace block — do NOT just swap the marker.
+elif "<!-- BEGIN agents/adana.md (embedded by setup) -->" in claude_md:
+    claude_md_new = re.sub(
+        r'<!-- BEGIN agents/adana\.md \(embedded by setup\) -->.*?<!-- END agents/adana\.md -->',
+        lambda m: "__ADANA_FULL_WORKSPACE_BLOCK__",   # full Step 5c block, not just new_block
+        claude_md, count=1, flags=re.DOTALL,
+    )
+
+# Case 3 — markers absent: do not partial-write here. Fall through to "missing entirely"
+# and PREPEND the full Step 5c workspace block above all existing content.
+else:
+    claude_md_new = claude_md
+
+if claude_md_new != claude_md:
+    open("CLAUDE.md", "w", encoding="utf-8").write(claude_md_new)   # show the diff first
+```
 
 **Then patch any remaining gaps:**
-- **Missing `## Credential Loading` block** → append it under the Agent Identity block, verbatim from `adana-setup` Step 5c.
+- **Missing entirely** → create from scratch via the full `adana-setup` Step 5c flow.
+- **Missing `## Credential Loading` block** → insert it **directly under the Agent Identity block**, verbatim from `adana-setup` Step 5c. Not at end-of-file — it must be adjacent to the identity it serves.
 
 Show the user a unified diff before writing. Never overwrite content outside the managed markers.
 

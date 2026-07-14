@@ -153,8 +153,6 @@ embed_date = datetime.date.today().isoformat()
 
 Build the workspace block below and write it to `CLAUDE.md` at the workspace root. Substitute `{BODY}` (the stripped `adana.md` body from 5b), `{version}`, `{version_date}`, and `{embed_date}`.
 
-If `CLAUDE.md` already exists, replace everything between the `BEGIN`/`END` markers and leave content outside them untouched. If the markers aren't present, append the whole block. If the file doesn't exist, create it.
-
 We embed the **full content** of `agents/adana.md` rather than a path reference, so the workspace is self-contained — scheduled runs and fresh clones still get the agent identity, because Claude auto-loads `CLAUDE.md` at session start.
 
 ````markdown
@@ -197,7 +195,14 @@ Scheduled and automated runs do **not** automatically inject environment variabl
 Run this **before** reading `GATEWAY_API_KEY`. Every `adana_*` tool call takes it as its first argument. If it is still missing after this step, stop and tell the user to re-run `/adana-dsa:adana-setup` — do not proceed and do not silently skip persistence.
 ````
 
-Show the user a preview before writing and confirm.
+**If `CLAUDE.md` already exists:**
+- If it contains the markers `<!-- BEGIN agents/adana.md (embedded by adana-setup) -->` and `<!-- END agents/adana.md -->`, replace everything between (and including) them with the freshly read `{BODY}` wrapped in the same markers **and a refreshed version stamp**. Leave the rest of the file untouched.
+- **Legacy format (v0.2.0–v0.2.2):** those versions wrote a bare block marked `<!-- BEGIN agents/adana.md (embedded by setup) -->` — note `setup`, not `adana-setup` — with no `## Agent Identity` heading and no Credential Loading section. If you find that marker, replace the entire legacy block with the full workspace block above. A workspace left in the legacy shape has no credential loader, so its scheduled runs cannot authenticate.
+- Otherwise, **prepend** the new workspace block above all existing content. The agent identity must lead the file.
+
+**If `CLAUDE.md` does not exist:** create it with the full workspace block above.
+
+Show the user a unified diff before writing.
 
 ### 5d. Verify
 

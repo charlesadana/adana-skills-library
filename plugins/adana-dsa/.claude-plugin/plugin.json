@@ -1,6 +1,6 @@
 {
   "name": "adana-dsa",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Adana deal-sourcing agent — runs CoStar / Reonomy saved searches and LexisNexis contact enrichment under Adana's own logins, persisting everything through the Adana gateway MCP.",
   "author": {
     "name": "Adana Capital",
