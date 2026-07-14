@@ -1,6 +1,6 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.2.2';
-const DEFAULT_DATE = 'Jun 30, 2026';
+const DEFAULT_VERSION = 'v0.2.3';
+const DEFAULT_DATE = 'Jul 14, 2026';
 
 // Export constants initially with default values
 export const APP_VERSION = DEFAULT_VERSION;
@@ -9,6 +9,17 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.2.3',
+    date: 'Jul 14, 2026',
+    changes: [
+      'Adopted the fiveagents-marketplace path + credential conventions across all skills',
+      'CLAUDE.md now embeds a ## Credential Loading block with load_credentials() — scheduled runs do NOT inject env vars from .claude/settings.local.json, so the Monday collection run previously would have started with no GATEWAY_API_KEY',
+      'adana-setup Step 5a: agent-file lookup now globs $CLAUDE_CONFIG_DIR first (Cowork sandbox is Ubuntu regardless of host), with Windows/macOS fallbacks and an ask-the-user escape hatch',
+      'plugin-update Step 0: replaced the literal <path_to_agents/adana.md> placeholder with the real Cowork-first locator; Step 1a now searches up from cwd for settings.local.json; Step 1c checks for the Credential Loading block; Step 3c re-embeds adana.md unconditionally every run',
+      'Fixed version drift — plugin.json and marketplace.json were stuck at 0.1.0 across three releases; all four version files now bump in lockstep (enforced in workflow/commit-to-git.md)',
+    ],
+  },
   {
     version: 'v0.2.2',
     date: 'Jul 14, 2026',

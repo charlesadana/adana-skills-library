@@ -36,7 +36,7 @@ Read `agents/adana.md` first for the gateway connection rules and the
 - The user is signed into **LexisNexis / Nexis** with **Public Records** access
   (top nav shows a "Public Records" tab). If not, ask them to sign in — never
   enter credentials.
-- The plugin's `gateway_api_key` is set.
+- `GATEWAY_API_KEY` is loaded — run `load_credentials()` from CLAUDE.md's **Credential Loading** section before the first `adana_*` call. Scheduled runs do not inject it automatically.
 
 A note on responsible use: LexisNexis access is governed by DPPA/GLBA
 permissible-use rules the user has already attested to. **Leave the

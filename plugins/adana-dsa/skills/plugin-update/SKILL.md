@@ -40,18 +40,34 @@ If `CLAUDE.md` doesn't exist at the workspace root, exit and tell the user to ru
 
 Read the **installed** plugin version from `agents/adana.md` (the Maintenance table `Version` column). Then read the **last-applied** version from the `CLAUDE.md` stamp at the workspace root.
 
-```python
-import re
+Locate `agents/adana.md` with the same Cowork-first search `adana-setup` Step 5a uses — `$CLAUDE_CONFIG_DIR` glob, then host-OS fallbacks, then ask the user for an absolute path.
 
-# Installed version — from agents/adana.md Maintenance table
-with open("<path_to_agents/adana.md>", encoding="utf-8") as f:
-    adana_md = f.read()
+```python
+import glob, os, re
+
+config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+patterns = []
+if config_dir:
+    patterns.append(os.path.join(config_dir, "**/agents/adana.md"))
+patterns.extend([
+    os.path.expanduser("~/.claude/**/agents/adana.md"),
+    os.path.expandvars(r"%APPDATA%\Claude\**\agents\adana.md"),
+    os.path.expanduser("~/Library/Application Support/Claude/**/agents/adana.md"),
+])
+found = [f for p in patterns for f in glob.glob(p, recursive=True)]
+if not found:
+    raise SystemExit("Could not locate agents/adana.md — ask the user for the full absolute "
+                     "path (in Cowork: echo $CLAUDE_CONFIG_DIR).")
+
+adana_md_path = os.path.abspath(os.path.realpath(found[0]))
+adana_md = open(adana_md_path, encoding="utf-8").read()
+
+# Installed version — from the agents/adana.md Maintenance table
 version_match = re.search(r'\|\s*Adana\s*\|\s*(v[\S]+)\s*\|', adana_md)
 installed_version = version_match.group(1).strip() if version_match else "unknown"
 
-# Last-applied version — from CLAUDE.md stamp
-with open("CLAUDE.md", encoding="utf-8") as f:
-    claude_md = f.read()
+# Last-applied version — from the CLAUDE.md stamp at the workspace root
+claude_md = open("CLAUDE.md", encoding="utf-8").read()
 stamp_match = re.search(r'<!--\s*adana\.md version:\s*(v[\S]+)\s*\|', claude_md)
 last_applied = stamp_match.group(1).strip() if stamp_match else "unknown"
 ```
@@ -73,7 +89,7 @@ Inspect silently — no prompts yet, just look. Tag each item as ✅ / ❌ / ⏭
 
 ### 1a. Env vars
 
-Read `.claude/settings.local.json` at the workspace root. Check the `env` block:
+Read `.claude/settings.local.json` (**search up from cwd** — same lookup the `load_credentials()` snippet performs). Check the `env` block:
 
 | Env var | Required since | Status |
 |---|---|---|
@@ -93,13 +109,16 @@ Probe the gateway by attempting a low-cost call (`adana_log_run` with a dry-run 
 
 Check `CLAUDE.md` at the workspace root:
 
-| Item | Status |
-|---|---|
-| File exists | present / missing |
-| Contains `<!-- BEGIN agents/adana.md` block | present / missing |
-| Version stamp matches installed version | match / stale |
+| Item | Required since | Status |
+|---|---|---|
+| File exists | v0.2.0 | present / missing |
+| Contains `<!-- BEGIN agents/adana.md` block | v0.2.0 | present / missing |
+| Contains `## Credential Loading` block with the `load_credentials()` snippet | v0.2.3 | present / missing |
+| Version stamp matches installed version | v0.2.0 | match / stale |
 
 A stale stamp means the CLAUDE.md was written at an older version and needs refreshing — the embedded `adana.md` body may be out of date.
+
+**A missing Credential Loading block is a required gap, not cosmetic.** Scheduled runs do not inject env vars from `.claude/settings.local.json`. Without the loader, the Monday collection run starts with no `GATEWAY_API_KEY` and every `adana_*` call fails. Any workspace set up before v0.2.3 has this gap.
 
 ### 1d. New skill requirements
 
@@ -133,6 +152,7 @@ Connector
 
 CLAUDE.md
   ⚠️  Version stamp stale (v0.1.0 embedded, v0.2.0 installed) — refresh needed
+  ❌ Credential Loading block missing — scheduled runs will have no GATEWAY_API_KEY
 
 Scheduled tasks
   ❌ Adana · Weekly Collection — not found in Cowork
@@ -163,11 +183,18 @@ Delegate to `/adana-dsa:adana-setup` Step 2. Ask the user to paste the key; writ
 
 Delegate to `/adana-dsa:adana-setup` Step 3. Walk the user through Settings → Connectors → Add custom connector.
 
-### 3c. CLAUDE.md stale or missing
+### 3c. CLAUDE.md
 
-Re-embed `agents/adana.md` using the same logic as `/adana-dsa:adana-setup` Step 5. Read the current `adana.md`, strip frontmatter, write the block between `BEGIN/END` markers in `CLAUDE.md`, update the version stamp.
+**Always re-embed the full `agents/adana.md` body between the `BEGIN`/`END` markers — unconditionally, every run, regardless of whether any other CLAUDE.md gap was found.** Refreshing the stamp comment alone is wrong: after a `git pull` that adds skills or changes the gateway rules, the stamp would read the new version while the embedded body still describes the old one. Always replace the body too.
 
-Show the user a diff of what's changing before writing. Never overwrite content outside the `BEGIN/END` markers.
+Use the same logic as `/adana-dsa:adana-setup` Step 5 — locate `adana.md`, strip frontmatter, rebuild the block, update the version stamp.
+
+**Then patch any remaining gaps:**
+- **Missing `## Credential Loading` block** → append it under the Agent Identity block, verbatim from `adana-setup` Step 5c.
+
+Show the user a unified diff before writing. Never overwrite content outside the managed markers.
+
+**Verify after re-embed:** confirm the stamp matches `adana.md`'s current Maintenance version, and that a string unique to that version appears in the embedded body. If it doesn't, the body didn't get replaced — re-read the full text and retry.
 
 ### 3d. Scheduled task missing
 
@@ -185,7 +212,7 @@ Test only the items touched in Step 3.
 
 - **GATEWAY_API_KEY** — call `adana_log_run` with a dry-run test entry. If it returns 200, key is valid.
 - **Gateway connector** — probe `adana_log_run` again and confirm the connector responds.
-- **CLAUDE.md** — read it back and confirm the version stamp matches `installed_version`.
+- **CLAUDE.md** — read it back and confirm the version stamp matches `installed_version`, and that the `## Credential Loading` block with `load_credentials()` is present.
 - **Scheduled task** — ask the user to confirm `Adana · Weekly Collection` now appears in Cowork → Scheduled.
 
 Show a result table:

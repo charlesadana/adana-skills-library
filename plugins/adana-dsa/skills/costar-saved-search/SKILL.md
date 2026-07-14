@@ -33,7 +33,7 @@ Read `agents/adana.md` first for the gateway connection rules and the
 ## Prerequisites
 
 - The user is logged into CoStar in the Chrome instance the browser tools control.
-- The plugin's `gateway_api_key` is set.
+- `GATEWAY_API_KEY` is loaded — run `load_credentials()` from CLAUDE.md's **Credential Loading** section before the first `adana_*` call. Scheduled runs do not inject it automatically.
 
 Set up a task list and **confirm the saved-search name** before driving the browser.
 

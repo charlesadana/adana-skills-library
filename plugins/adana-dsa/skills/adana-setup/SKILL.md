@@ -38,10 +38,14 @@ If they say no, ask them to:
 
 ## Step 2 — Gateway API key
 
-Ask:
-> Go to **[gateway.adanacap.com](https://gateway.adanacap.com)** → **Settings → API Keys** → generate a new key (starts with `adana_live_…`). Paste it here.
+The gateway dashboard is **invite-only**. If the user has never signed in, they need an invite before this step can proceed — ask a gateway admin to send one, then come back.
 
-Once they paste the key, write it to `.claude/settings.local.json` under `env`. Preserve any existing keys — only add or update `GATEWAY_API_KEY`:
+Ask:
+> Go to **[gateway.adanacap.com](https://gateway.adanacap.com)** → sign in → **Settings → API Keys** → generate a new key (starts with `adana_live_…`). Paste it here.
+
+If they hit the login wall, stop here — there is no way around it and the rest of setup is pointless without a key.
+
+Once they paste the key, write it to `.claude/settings.local.json` at the workspace root, under `env`. Read the existing file first and preserve every other key — only add or update `GATEWAY_API_KEY`. Never overwrite the file wholesale.
 
 ```json
 {
@@ -52,6 +56,8 @@ Once they paste the key, write it to `.claude/settings.local.json` under `env`. 
 ```
 
 If the file doesn't exist, create it. Confirm: "Gateway API key saved."
+
+This file is what the skills actually read at runtime — via the `load_credentials()` snippet that Step 5 embeds into `CLAUDE.md`. Scheduled runs do not inject env vars automatically, so **both halves are required**: the key here, and the loader there. Setting one without the other leaves the Monday collection run with no `GATEWAY_API_KEY`.
 
 ## Step 3 — Gateway connector
 
@@ -86,63 +92,120 @@ This is the step that makes the Adana agent load automatically on every session.
 
 ### 5a. Locate adana.md
 
-Find the absolute path to `agents/adana.md`. In Cowork, start from `$CLAUDE_CONFIG_DIR` (the env var Cowork sets to point at the mounted plugin tree):
+The agent definition ships with the plugin. The skill runs inside the **Cowork sandbox** (Ubuntu Linux VM, regardless of host OS), so the canonical search location is `$CLAUDE_CONFIG_DIR/**/agents/adana.md`. The host-OS patterns are fallbacks for the rare case this runs outside Cowork.
 
 ```python
-import os, glob
+import glob, os
 
+# Cowork-first: $CLAUDE_CONFIG_DIR is the canonical plugin root inside the sandbox
+# (e.g. /sessions/<name>/mnt/.claude). $HOME/.claude is a secondary location.
 config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+
 patterns = []
 if config_dir:
     patterns.append(os.path.join(config_dir, "**/agents/adana.md"))
-patterns.append(os.path.expanduser("~/.claude/**/agents/adana.md"))
+patterns.extend([
+    os.path.expanduser("~/.claude/**/agents/adana.md"),                              # Linux / Cowork sandbox $HOME
+    os.path.expandvars(r"%APPDATA%\Claude\**\agents\adana.md"),                      # Windows host
+    os.path.expanduser("~/Library/Application Support/Claude/**/agents/adana.md"),   # macOS host
+])
 
 found = [f for p in patterns for f in glob.glob(p, recursive=True)]
-adana_md_path = os.path.abspath(found[0]) if found else None
 
-if not adana_md_path:
-    raise RuntimeError("Could not locate agents/adana.md — ask the user for the full path.")
+if found:
+    adana_md_path = os.path.abspath(os.path.realpath(found[0]))
+    adana_md_content = open(adana_md_path, encoding="utf-8").read()
+else:
+    adana_md_path = ""
+    adana_md_content = ""
 ```
 
-### 5b. Read and strip frontmatter
+**Why `$CLAUDE_CONFIG_DIR` first:** Cowork runs all skill code inside a sandboxed Ubuntu VM. The Windows and macOS patterns can never match inside the sandbox (they point at the user's host OS, which isn't reachable from skill code). `$CLAUDE_CONFIG_DIR` is the env var Cowork sets to point at the mounted plugin tree, so it's the only pattern guaranteed to find `adana.md` inside Cowork. The `~/.claude` pattern works in some Cowork configurations via bindfs mounts but isn't reliable.
+
+If the search returns empty, ask the user:
+> I couldn't auto-detect `agents/adana.md`. Can you paste the **full absolute path** to it? (Hint: in Cowork, run `echo $CLAUDE_CONFIG_DIR` and look under that directory.)
+
+After they paste a path, normalize, validate, and read:
 
 ```python
-import re
+user_path = os.path.abspath(os.path.expanduser(os.path.expandvars(user_input.strip().strip('"').strip("'"))))
+assert os.path.isfile(user_path), f"File not found: {user_path}"
+adana_md_path = user_path
+adana_md_content = open(adana_md_path, encoding="utf-8").read()
+```
 
-with open(adana_md_path, encoding="utf-8") as f:
-    content = f.read()
+### 5b. Strip frontmatter and extract the version
 
-body = re.sub(r'^---\s*\n.*?\n---\s*\n', '', content, count=1, flags=re.DOTALL).lstrip()
+Strip the YAML frontmatter — it is a plugin-loader directive and has no meaning inside `CLAUDE.md`:
 
-version_match = re.search(r'\|\s*Adana\s*\|\s*(v[\S]+)\s*\|', content)
+```python
+import re, datetime
+
+body = re.sub(r'^---\s*\n.*?\n---\s*\n', '', adana_md_content, count=1, flags=re.DOTALL).lstrip()
+
+version_match = re.search(r'\|\s*Adana\s*\|\s*(v[\S]+)\s*\|\s*([^|\n]+)\s*\|', adana_md_content)
 version = version_match.group(1).strip() if version_match else "unknown"
+version_date = version_match.group(2).strip() if version_match else "unknown"
+embed_date = datetime.date.today().isoformat()
 ```
 
 ### 5c. Write CLAUDE.md
 
-If `CLAUDE.md` already exists at the workspace root, check for an existing Adana block (`<!-- BEGIN agents/adana.md -->`). If found, replace it. If not, append. Never overwrite content outside the markers.
+Build the workspace block below and write it to `CLAUDE.md` at the workspace root. Substitute `{BODY}` (the stripped `adana.md` body from 5b), `{version}`, `{version_date}`, and `{embed_date}`.
 
-```python
-import datetime
+If `CLAUDE.md` already exists, replace everything between the `BEGIN`/`END` markers and leave content outside them untouched. If the markers aren't present, append the whole block. If the file doesn't exist, create it.
 
-embed_date = datetime.date.today().isoformat()
+We embed the **full content** of `agents/adana.md` rather than a path reference, so the workspace is self-contained — scheduled runs and fresh clones still get the agent identity, because Claude auto-loads `CLAUDE.md` at session start.
 
-block = (
-    f"<!-- BEGIN agents/adana.md (embedded by setup) -->\n"
-    f"<!-- adana.md version: {version} | Embedded: {embed_date} -->\n"
-    f"\n"
-    f"{body}\n"
-    f"<!-- END agents/adana.md -->"
-)
-```
+````markdown
+# Adana Capital — Workspace Instructions
 
-Show the user a preview before writing and confirm. If `CLAUDE.md` doesn't exist, create it with just the block.
+## Agent Identity (auto-loaded every session)
+
+The full content of `agents/adana.md` is embedded below. It defines the gateway connection rules, the pipeline, the hard rules, and the working discipline. All skill runs depend on it.
+
+<!-- BEGIN agents/adana.md (embedded by adana-setup) -->
+<!-- adana.md version: {version} | Last Changed: {version_date} | Embedded: {embed_date} -->
+
+{BODY}
+
+<!-- END agents/adana.md -->
+
+---
+
+## Credential Loading (REQUIRED — read this first on every run)
+
+Scheduled and automated runs do **not** automatically inject environment variables from `.claude/settings.local.json`. You must load them manually at the start of every skill run using this snippet:
+
+    import os, json
+    from pathlib import Path
+
+    def load_credentials():
+        search = Path(os.getcwd())
+        for p in [search] + list(search.parents):
+            settings_file = p / ".claude" / "settings.local.json"
+            if settings_file.exists():
+                data = json.loads(settings_file.read_text())
+                for k, v in data.get("env", {}).items():
+                    if not os.environ.get(k):
+                        os.environ[k] = v
+                return True
+        return False
+
+    load_credentials()
+
+Run this **before** reading `GATEWAY_API_KEY`. Every `adana_*` tool call takes it as its first argument. If it is still missing after this step, stop and tell the user to re-run `/adana-dsa:adana-setup` — do not proceed and do not silently skip persistence.
+````
+
+Show the user a preview before writing and confirm.
 
 ### 5d. Verify
 
-Read back `CLAUDE.md` and confirm the block is present and the version stamp matches. Tell the user:
+Read back `CLAUDE.md` and confirm:
+- the `BEGIN`/`END` markers are present and the version stamp matches `adana.md`'s Maintenance version
+- the `## Credential Loading` section with the `load_credentials()` snippet is present
 
-> ✅ CLAUDE.md created — the Adana agent will load automatically on every session in this project. You're all set.
+> ✅ CLAUDE.md created — the Adana agent and the credential loader will load automatically on every session, including scheduled runs.
 
 ## Step 6 — Schedule weekly collection
 
@@ -175,7 +238,7 @@ Summarise what was configured:
 - Gateway API key saved to `.claude/settings.local.json`
 - Gateway connector registered
 - Claude in Chrome confirmed
-- CLAUDE.md created with Adana agent embedded
+- CLAUDE.md created — Adana agent embedded + credential loader
 - Weekly collection scheduled for Mondays
 
 The pipeline is live. Properties flow in Monday → qualify Tuesday (gateway cron) → Gate 1 review → outreach.

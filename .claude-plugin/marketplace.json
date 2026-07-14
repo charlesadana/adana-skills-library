@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "Automated deal-sourcing skills for Adana Capital — browser collection (CoStar / Reonomy / LexisNexis) that persists to the Adana gateway.",
-    "version": "0.1.0"
+    "version": "0.2.3"
   },
   "plugins": [
     {
       "name": "adana-dsa",
       "source": "./plugins/adana-dsa",
       "description": "Adana deal-sourcing agent — runs CoStar / Reonomy saved searches and LexisNexis contact enrichment under Adana's own logins, persisting everything through the Adana gateway MCP.",
-      "version": "0.1.0",
+      "version": "0.2.3",
       "author": {
         "name": "Adana Capital",
         "email": "charles@adanacap.com"

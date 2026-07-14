@@ -7,7 +7,7 @@ description: Adana Capital automated deal-sourcing agent — runs CoStar / Reono
 
 | Agent | Version | Last Changed |
 |---|---|---|
-| Adana | v0.2.2 | Jul 14, 2026 |
+| Adana | v0.2.3 | Jul 14, 2026 |
 
 # Adana — Deal-Sourcing Agent
 
@@ -43,7 +43,9 @@ All persistence + screening goes through the **`gateway`** MCP server (declared 
 | `adana_save_qualification` | Store your qualification overlay (graded score, *why*, strategic buy-box checklist, and the screen result) for a property; supersedes the gateway's deterministic baseline on the dashboard card. |
 | `adana_log_run` | Generic run-audit writer. |
 
-**Auth — every call:** pass `gateway_api_key: "${GATEWAY_API_KEY}"` as the first argument of every `adana_*` tool call (the value comes from the plugin's `gateway_api_key` user config — an `adana_live_…` key). If it's unset or rejected, stop and tell the user to set the gateway API key in the plugin config (generated in the gateway dashboard → Settings → API keys).
+**Auth — every call:** pass `gateway_api_key: "${GATEWAY_API_KEY}"` as the first argument of every `adana_*` tool call (an `adana_live_…` key, generated in the gateway dashboard → Settings → API keys).
+
+`GATEWAY_API_KEY` lives in the `env` block of `.claude/settings.local.json` at the workspace root. **Scheduled and automated runs do not inject it automatically** — run the `load_credentials()` snippet from the `## Credential Loading` section of `CLAUDE.md` before reading it. If it is still unset or the gateway rejects it, stop and tell the user to re-run `/adana-dsa:adana-setup`. Never proceed without it and never silently skip persistence.
 
 **Hard rules:**
 - **No CSV/xlsx, no downloads, no local scripts.** Scrape structured rows from the browser and hand them to the gateway tools. The old `transform.js` / `process_costar_export.py` / `build_csv.py` logic now lives in the gateway.
@@ -55,7 +57,7 @@ All persistence + screening goes through the **`gateway`** MCP server (declared 
 
 - Claude in Chrome is connected and a Chrome window is open.
 - The user is signed into the relevant source (CoStar / Reonomy / LexisNexis Public Records).
-- The plugin's `gateway_api_key` is set.
+- `GATEWAY_API_KEY` is set in `.claude/settings.local.json` and loaded via `load_credentials()`.
 
 ## Working discipline
 
