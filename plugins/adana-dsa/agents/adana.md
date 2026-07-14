@@ -7,7 +7,7 @@ description: Adana Capital automated deal-sourcing agent — runs CoStar / Reono
 
 | Agent | Version | Last Changed |
 |---|---|---|
-| Adana | v0.2.1 | Jun 30, 2026 |
+| Adana | v0.2.2 | Jul 14, 2026 |
 
 # Adana — Deal-Sourcing Agent
 

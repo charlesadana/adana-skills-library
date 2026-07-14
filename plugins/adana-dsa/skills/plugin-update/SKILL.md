@@ -105,6 +105,16 @@ A stale stamp means the CLAUDE.md was written at an older version and needs refr
 
 For each skill in `skills-manifest.json`, check whether its `deps.env` and `deps.mcp` entries are already satisfied. Right now all three operational skills share the same requirements (`GATEWAY_API_KEY` + Claude in Chrome), so this reduces to checking 1a and 1b. As new skills are added with different deps, add rows here.
 
+### 1e. Scheduled task
+
+The `Adana · Weekly Collection` task cannot be probed — it lives in Cowork's scheduler only. Ask the user:
+
+> Does **"Adana · Weekly Collection"** appear in Cowork → Scheduled tasks?
+
+| Item | Status |
+|---|---|
+| `Adana · Weekly Collection` scheduled | present / missing |
+
 ---
 
 ## Step 2 — Show the gap report
@@ -118,17 +128,20 @@ Plugin version: v0.1.0 → v0.2.0
 Env vars
   ✅ GATEWAY_API_KEY
 
-MCP
+Connector
   ✅ gateway registered
 
 CLAUDE.md
   ⚠️  Version stamp stale (v0.1.0 embedded, v0.2.0 installed) — refresh needed
 
+Scheduled tasks
+  ❌ Adana · Weekly Collection — not found in Cowork
+
 New skills since v0.1.0
-  ✅ setup, costar-saved-search, reonomy-saved-search, lexisnexis-contact-lookup
+  ✅ adana-setup, costar-saved-search, reonomy-saved-search, lexisnexis-contact-lookup
   (no new requirements — existing GATEWAY_API_KEY covers all)
 
-→ 0 required gaps · 1 stale item · ready to refresh?
+→ 1 required gap · 1 stale item · ready to refresh?
 ```
 
 Ask:
@@ -156,9 +169,13 @@ Re-embed `agents/adana.md` using the same logic as `/adana-dsa:adana-setup` Step
 
 Show the user a diff of what's changing before writing. Never overwrite content outside the `BEGIN/END` markers.
 
-### 3d. New skill requirements (future)
+### 3d. Scheduled task missing
 
-When new skills are added that introduce new env vars or MCPs, add fill handlers here that match `/adana-dsa:adana-setup` steps for those specific items. Document the requirement and the version it was introduced. Right now no fill handler is needed beyond 3a–3c.
+Delegate to `/adana-dsa:adana-setup` Step 6. Invoke `/schedule` to recreate `Adana · Weekly Collection` (Weekly, Monday, 9 AM default).
+
+### 3e. New skill requirements (future)
+
+When new skills are added that introduce new env vars or MCPs, add fill handlers here that match `/adana-dsa:adana-setup` steps for those specific items. Document the requirement and the version it was introduced. Right now no fill handler is needed beyond 3a–3d.
 
 ---
 
@@ -169,6 +186,7 @@ Test only the items touched in Step 3.
 - **GATEWAY_API_KEY** — call `adana_log_run` with a dry-run test entry. If it returns 200, key is valid.
 - **Gateway connector** — probe `adana_log_run` again and confirm the connector responds.
 - **CLAUDE.md** — read it back and confirm the version stamp matches `installed_version`.
+- **Scheduled task** — ask the user to confirm `Adana · Weekly Collection` now appears in Cowork → Scheduled.
 
 Show a result table:
 

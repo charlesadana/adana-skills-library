@@ -1,5 +1,5 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.2.1';
+const DEFAULT_VERSION = 'v0.2.2';
 const DEFAULT_DATE = 'Jun 30, 2026';
 
 // Export constants initially with default values
@@ -9,6 +9,14 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.2.2',
+    date: 'Jul 14, 2026',
+    changes: [
+      'adana-setup: added Step 6 — schedule weekly Monday collection via Cowork /schedule (CoStar → Reonomy → LexisNexis); includes "computer must be on" warning aligned with liangzai-setup pattern',
+      'plugin-update: added Step 1e scheduled task check (ask user), gap report row, Step 3d fill handler, Step 4 re-validate for Adana · Weekly Collection',
+    ],
+  },
   {
     version: 'v0.2.1',
     date: 'Jun 30, 2026',

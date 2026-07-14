@@ -144,6 +144,31 @@ Read back `CLAUDE.md` and confirm the block is present and the version stamp mat
 
 > ✅ CLAUDE.md created — the Adana agent will load automatically on every session in this project. You're all set.
 
+## Step 6 — Schedule weekly collection
+
+Collection runs every **Monday** — CoStar → Reonomy → LexisNexis. Create the scheduled task now with Cowork's own scheduler.
+
+**Use Cowork's `/schedule` — do not ask the user to click through settings.** Invoke `/schedule` directly and give it the task name, frequency, and prompt. Cowork asks them to confirm, and the task appears on its Scheduled page.
+
+Ask what time on Monday they want it to run (default: **9 AM**). Then create:
+
+**Task — `Adana · Weekly Collection`** · frequency **Weekly, Monday** at their chosen time:
+
+```
+Run the Adana weekly collection pipeline in sequence:
+1. /adana-dsa:costar-saved-search
+2. /adana-dsa:reonomy-saved-search
+3. /adana-dsa:lexisnexis-contact-lookup
+
+Run each skill to completion before starting the next. After all three complete, summarise the counts returned by the gateway (new properties found, updated, contacts enriched).
+```
+
+**The schedule lives in Cowork only.** To see or change when it runs, open Cowork → Scheduled. There is no other copy.
+
+Then tell the user plainly:
+
+> These jobs only run while this computer is on and Cowork is running. If it's off on Monday, the run is missed — and there's no catch-up for properties that aged off CoStar or Reonomy in the meantime. So: **keep an eye on the gateway → Runs page.** If a Monday goes by with no new run logged, something is wrong — open Cowork and check the Scheduled tab.
+
 ## Done
 
 Summarise what was configured:
@@ -151,5 +176,6 @@ Summarise what was configured:
 - Gateway connector registered
 - Claude in Chrome confirmed
 - CLAUDE.md created with Adana agent embedded
+- Weekly collection scheduled for Mondays
 
-Skills are ready to run. Start with `/adana-dsa:costar-saved-search` to pull your first saved search.
+The pipeline is live. Properties flow in Monday → qualify Tuesday (gateway cron) → Gate 1 review → outreach.
