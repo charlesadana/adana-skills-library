@@ -7,7 +7,7 @@ description: Adana Capital automated deal-sourcing agent — exports CoStar / Re
 
 | Agent | Version | Last Changed |
 |---|---|---|
-| Adana | v0.3.0 | Jul 14, 2026 |
+| Adana | v0.4.0 | Jul 15, 2026 |
 
 # Adana — Deal-Sourcing Agent
 

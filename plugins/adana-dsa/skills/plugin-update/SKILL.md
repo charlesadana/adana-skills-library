@@ -156,15 +156,21 @@ For each skill in `skills-manifest.json`, check whether its `deps.env`, `deps.mc
 
 As new skills are added with different deps, add rows here.
 
-### 1e. Scheduled task
+### 1e. Scheduled tasks
 
-The `Adana · Weekly Collection` task cannot be probed — it lives in Cowork's scheduler only. Ask the user:
+Scheduled tasks cannot be probed — they live in Cowork's scheduler only. Ask the user what they see under Cowork → Scheduled.
 
-> Does **"Adana · Weekly Collection"** appear in Cowork → Scheduled tasks?
+As of **v0.4.0** there are **two** separate weekly tasks. The single combined `Adana · Weekly Collection` was split: CoStar and LexisNexis now run as their own staggered Monday jobs, and Reonomy is no longer scheduled.
 
-| Item | Status |
-|---|---|
-| `Adana · Weekly Collection` scheduled | present / missing |
+> In Cowork → Scheduled, do you see **"Adana · CoStar Collection"** and **"Adana · LexisNexis Enrichment"**? And is the old combined **"Adana · Weekly Collection"** still listed?
+
+| Item | Required since | Status |
+|---|---|---|
+| `Adana · CoStar Collection` scheduled | v0.4.0 | present / missing |
+| `Adana · LexisNexis Enrichment` scheduled | v0.4.0 | present / missing |
+| Legacy `Adana · Weekly Collection` removed | v0.4.0 | removed / **still present** |
+
+A workspace set up before v0.4.0 has the single combined task and neither of the two new ones — that's the migration Step 3d handles. The old task must be **deleted**, not left alongside the new ones: it keeps Reonomy on a schedule and re-runs the whole pipeline in one Monday block, double-collecting.
 
 ---
 
@@ -174,7 +180,7 @@ Show a compact summary before doing anything. Example format:
 
 ```
 [adana-dsa] Plugin Update — Gap Report
-Plugin version: v0.2.2 → v0.3.0
+Plugin version: v0.2.2 → v0.4.0
 
 Env vars
   ✅ GATEWAY_API_KEY
@@ -188,21 +194,24 @@ Working folders
   ❓ Chrome download location — needs your confirmation
 
 CLAUDE.md
-  ⚠️  Version stamp stale (v0.2.2 embedded, v0.3.0 installed)
+  ⚠️  Version stamp stale (v0.2.2 embedded, v0.4.0 installed)
   ❌ Workspace Defaults / Workspace Structure missing (new in v0.3.0)
 
 Scheduled tasks
-  ✅ Adana · Weekly Collection
+  ❌ Adana · CoStar Collection · Adana · LexisNexis Enrichment   (split in v0.4.0)
+  ⚠️  legacy "Adana · Weekly Collection" still scheduled — delete it (Step 3d)
 
-Skills changed in v0.3.0
+Skills changed since v0.2.2
   ⚠️  costar-saved-search, reonomy-saved-search — now EXPORT instead of scraping
       the results grid (the old approach never completed on a real search).
-      Requires the export folder + Chrome download location above.
+      Requires the export folder + Chrome download location above. (v0.3.0)
   ⚠️  lexisnexis-contact-lookup — now resumable via lexisnexis/results.json,
       and orders phones by listing name so a relative's number can't become the
-      primary contact.
+      primary contact. (v0.3.0)
+  ⚠️  scheduling split into two staggered Monday tasks; Reonomy is now manual.
+      Delete the old combined task and create the two above. (v0.4.0)
 
-→ 4 required gaps · 1 stale item · ready to fix?
+→ 5 required gaps · 1 legacy task to remove · 1 stale item · ready to fix?
 ```
 
 Ask:
@@ -293,9 +302,22 @@ Show the user a unified diff before writing. Never overwrite content outside the
 
 **Verify after re-embed:** confirm the stamp matches `adana.md`'s current Maintenance version, and that a string unique to that version appears in the embedded body. If it doesn't, the body didn't get replaced — re-read the full text and retry.
 
-### 3d. Scheduled task missing
+### 3d. Scheduled tasks missing or not yet split (v0.4.0)
 
-Delegate to `/adana-dsa:adana-setup` Step 7. Invoke `/schedule` to recreate `Adana · Weekly Collection` (Weekly, Monday, 9 AM default).
+The two weekly tasks are created by `/adana-dsa:adana-setup` Step 7. Fill whichever is missing, and migrate any workspace still on the old combined task.
+
+**First, if the legacy `Adana · Weekly Collection` task still exists (pre-v0.4.0 workspace):** it must be deleted before creating the replacements — otherwise it keeps running Reonomy on a schedule and re-collecting the whole pipeline in one Monday block. `/schedule` cannot delete tasks, so this is a manual step for the user:
+
+> You still have the old **"Adana · Weekly Collection"** task. Open Cowork → Scheduled, delete it, then tell me — I'll set up the two replacement tasks.
+
+Wait for the user to confirm the deletion before creating the new tasks, so the workspace never ends up with all three scheduled at once.
+
+**Then create the two tasks**, exactly as `adana-setup` Step 7 does — invoke `/schedule` once per task. Create only the one(s) missing; skip any the user already has:
+
+- `Adana · CoStar Collection` — **Weekly, Monday**, first time (default 9 AM) → runs `/adana-dsa:costar-saved-search`.
+- `Adana · LexisNexis Enrichment` — **Weekly, Monday**, a later time (default 2 PM, staggered after CoStar) → runs `/adana-dsa:lexisnexis-contact-lookup`.
+
+**Reonomy is not scheduled** — it runs on demand via `/adana-dsa:reonomy-saved-search`, and its output is picked up by the next LexisNexis run. Do not recreate a Reonomy task.
 
 ### 3e. New skill requirements (future)
 
@@ -312,7 +334,7 @@ Test only the items touched in Step 3.
 - **CLAUDE.md** — read it back and confirm the version stamp matches `installed_version`, and that `## Credential Loading`, `## Workspace Defaults` and `## Workspace Structure` are all present.
 - **Working folders** — confirm both exist and both env vars are set.
 - **Chrome download location** — run the round-trip check: have the user download any small file, then confirm it appears in `exports/` from the sandbox (`os.listdir("exports")`). Asking is not enough; this is the one that silently breaks the scheduled run.
-- **Scheduled task** — ask the user to confirm `Adana · Weekly Collection` now appears in Cowork → Scheduled.
+- **Scheduled tasks** — ask the user to confirm both `Adana · CoStar Collection` and `Adana · LexisNexis Enrichment` now appear in Cowork → Scheduled, and that the legacy `Adana · Weekly Collection` is gone.
 
 Show a result table:
 

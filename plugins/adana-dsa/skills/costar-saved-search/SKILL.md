@@ -236,7 +236,7 @@ adana_save_qualification(
     address_raw: "<same address you ingested>",    // or property_id
     score: 1-10,                                     // your conviction, not the screen's 10/0
     action: "PURSUE" | "REVIEW" | "PASS",
-    why: "<one short paragraph>",
+    why: "<one sentence — the deal basis only: property type, acreage, city, FAR band, and the PLSF/PSFB clearance (e.g. 'Laydown Yard on 11.9 ac in Crosby. FAR 10.6% [10-18%] — PLSF $11.86 < $23, clears the buy-box on basis.'). No strategic / submarket / IOS-thesis commentary.>",
     checks: [
       { "label": "Significant outdoor storage (stabilized yard)", "pass": true },
       { "label": "Major highway access", "pass": true, "note": "I-10 / SH-146" },
@@ -251,6 +251,10 @@ adana_save_qualification(
 ```
 
 Rules:
+- **Keep the `why` to the deal basis — one sentence.** State property type,
+  acreage, city, the FAR band, and the PLSF/PSFB clearance ("clears the buy-box
+  on basis"). Do **not** append a strategic, submarket, or IOS-thesis sentence —
+  the strategic read belongs in the `checks`, not the prose.
 - **Reuse the screen's math — never recompute it.** The `screen` block comes
   straight from the `adana_screen_costar` result for that row (`metric`, `value`,
   `threshold`, `band` as returned); set `far` to the **decimal** (`far_pct ÷ 100`,
@@ -261,8 +265,9 @@ Rules:
   one is worse than leaving it false.
 - **`action` mirrors the screen by default, but you may override it on strategic
   grounds** — e.g. a price near-miss that's a strong port-adjacent redevelopment
-  play can be `PURSUE` — as long as the `screen` block stays honest and the `why`
-  explains the override.
+  play can be `PURSUE` — as long as the `screen` block stays honest. Put the
+  reason for the override in a `checks` note (e.g. on "Redevelopment / vacancy
+  upside"), not in the `why` — the `why` stays basis-only.
 - The gateway stores this verbatim; your overlay **supersedes the gateway's own
   deterministic screen** on the dashboard card. Batch all rows into one call.
 

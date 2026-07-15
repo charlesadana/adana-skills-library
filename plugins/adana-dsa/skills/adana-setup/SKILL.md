@@ -301,30 +301,40 @@ Read back `CLAUDE.md` and confirm:
 
 > ✅ CLAUDE.md created — the Adana agent, the credential loader, and the folder paths will load automatically on every session, including scheduled runs.
 
-## Step 7 — Schedule weekly collection
+## Step 7 — Schedule the two weekly jobs
 
-Collection runs every **Monday** — CoStar → Reonomy → LexisNexis. Create the scheduled task now with Cowork's own scheduler.
+From here, two jobs run on their own as **separate** Cowork tasks:
 
-**Use Cowork's `/schedule` — do not ask the user to click through settings.** Invoke `/schedule` directly and give it the task name, frequency, and prompt. Cowork asks them to confirm, and the task appears on its Scheduled page.
+- **CoStar collection** — exports the CoStar saved search and ingests it (properties land in `needs_enrichment`).
+- **LexisNexis enrichment** — looks up contacts for every property sitting in `needs_enrichment` and writes them back.
 
-Ask what time on Monday they want it to run (default: **9 AM**). Then create:
+They are separate on purpose, and **staggered on the same Monday**. LexisNexis enriches whatever CoStar has already queued, so it must run *after* CoStar finishes — a few hours later the same day. This matches the pipeline order (`needs_enrichment → enriched` happens before the gateway's qualify step), so enrichment is done before Tuesday's qualification cron. One combined task would force enrichment to run inside the same block as the collection it depends on.
 
-**Task — `Adana · Weekly Collection`** · frequency **Weekly, Monday** at their chosen time:
+**Reonomy is not scheduled.** Run `/adana-dsa:reonomy-saved-search` by hand whenever you want off-market owners; its output flows into the same `needs_enrichment` queue, so the next LexisNexis run — scheduled or manual — picks it up. Neither scheduled task depends on Reonomy having run.
+
+**Use Cowork's `/schedule` — do not ask the user to click through settings.** Invoke `/schedule` directly **once per task**, giving it the name, frequency, and prompt. Cowork asks them to confirm, and each task appears on its Scheduled page.
+
+Ask the user for **two** times on Monday (defaults: **CoStar 9 AM**, **LexisNexis 2 PM**). Keep at least a few hours between them so collection finishes before enrichment starts. Then create both:
+
+**Task 1 — `Adana · CoStar Collection`** · frequency **Weekly, Monday** at the first time:
 
 ```
-Run the Adana weekly collection pipeline in sequence:
-1. /adana-dsa:costar-saved-search
-2. /adana-dsa:reonomy-saved-search
-3. /adana-dsa:lexisnexis-contact-lookup
-
-Run each skill to completion before starting the next. After all three complete, summarise the counts returned by the gateway (new properties found, updated, contacts enriched).
+Run /adana-dsa:costar-saved-search to completion.
+Then summarise the counts returned by the gateway (new properties found, updated, queued for enrichment).
 ```
 
-**The schedule lives in Cowork only.** To see or change when it runs, open Cowork → Scheduled. There is no other copy.
+**Task 2 — `Adana · LexisNexis Enrichment`** · frequency **Weekly, Monday** at the second, later time:
+
+```
+Run /adana-dsa:lexisnexis-contact-lookup to completion. It processes every property currently in needs_enrichment — whatever CoStar queued this morning, plus anything a manual Reonomy run added.
+Then summarise the counts returned by the gateway (contacts enriched, properties still without a contact).
+```
+
+**Both schedules live in Cowork only.** To see or change when they run, open Cowork → Scheduled. There is no other copy.
 
 Then tell the user plainly:
 
-> These jobs only run while this computer is on and Cowork is running. If it's off on Monday, the run is missed — and there's no catch-up for properties that aged off CoStar or Reonomy in the meantime. So: **keep an eye on the gateway → Runs page.** If a Monday goes by with no new run logged, something is wrong — open Cowork and check the Scheduled tab.
+> These jobs only run while this computer is on and Cowork is running. If it's off on Monday, that week's run is missed — and there's no catch-up for properties that aged off CoStar in the meantime. So: **keep an eye on the gateway → Runs page.** If a Monday goes by with no new CoStar or LexisNexis run logged, something is wrong — open Cowork and check the Scheduled tab.
 
 ## Done
 
@@ -334,6 +344,6 @@ Summarise what was configured:
 - Claude in Chrome confirmed
 - Working folders created (`exports/`, `lexisnexis/`); Chrome's download location points at `exports/` (round-trip verified)
 - CLAUDE.md created — Adana agent + credential loader + workspace defaults
-- Weekly collection scheduled for Mondays
+- Two weekly tasks scheduled for Mondays: `Adana · CoStar Collection`, then `Adana · LexisNexis Enrichment`. Reonomy runs on demand.
 
-The pipeline is live. Properties flow in Monday → qualify Tuesday (gateway cron) → Gate 1 review → outreach.
+The pipeline is live: CoStar collects Monday morning (→ `needs_enrichment`) → LexisNexis enriches Monday afternoon (→ `enriched`) → gateway qualifies (Tuesday cron) → Gate 1 review → outreach. Run Reonomy by hand when you want off-market owners.

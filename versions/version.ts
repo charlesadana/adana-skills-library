@@ -1,6 +1,6 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.3.0';
-const DEFAULT_DATE = 'Jul 14, 2026';
+const DEFAULT_VERSION = 'v0.4.0';
+const DEFAULT_DATE = 'Jul 15, 2026';
 
 // Export constants initially with default values
 export const APP_VERSION = DEFAULT_VERSION;
@@ -9,6 +9,16 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.4.0',
+    date: 'Jul 15, 2026',
+    changes: [
+      'Scheduling split into two separate, staggered weekly Cowork tasks. adana-setup Step 7 now creates "Adana · CoStar Collection" (Mon, default 9 AM) and "Adana · LexisNexis Enrichment" (Mon, default 2 PM, staggered after CoStar) instead of one combined "Adana · Weekly Collection". LexisNexis enriches whatever CoStar has already queued into needs_enrichment, so it must run after collection finishes — the same-day stagger matches the needs_enrichment → enriched pipeline order.',
+      'Reonomy is no longer scheduled — run /adana-dsa:reonomy-saved-search on demand; its output lands in the same needs_enrichment queue and the next LexisNexis run (scheduled or manual) picks it up.',
+      'plugin-update migrates pre-v0.4.0 workspaces: Step 1e now probes the two new tasks and detects the legacy combined task; Step 3d has the user delete the old task (Cowork /schedule cannot delete) BEFORE creating the two replacements, so the workspace never ends up double-collecting; Step 2 gap report and Step 4 re-validate updated for the two-task model.',
+      'costar-saved-search: adana_save_qualification `why` is now basis-only — one sentence stating property type, acreage, city, FAR band, and the PLSF/PSFB clearance. Strategic / submarket / IOS-thesis commentary and any action-override reason move to a `checks` note, keeping the dashboard prose to the deal basis.',
+    ],
+  },
   {
     version: 'v0.3.0',
     date: 'Jul 14, 2026',
