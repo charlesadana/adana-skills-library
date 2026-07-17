@@ -1,6 +1,6 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.4.0';
-const DEFAULT_DATE = 'Jul 15, 2026';
+const DEFAULT_VERSION = 'v0.4.1';
+const DEFAULT_DATE = 'Jul 17, 2026';
 
 // Export constants initially with default values
 export const APP_VERSION = DEFAULT_VERSION;
@@ -9,6 +9,13 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.4.1',
+    date: 'Jul 17, 2026',
+    changes: [
+      'adana-setup Step 1 hardened into a mandatory Cowork-project gate, matching brand-setup\'s (fiveagents-marketplace) Step 1a/1b pattern. Previously it only asked "are you in the right project?" — a bare "yes" satisfied it even from the wrong session, and every downstream write (exports/, lexisnexis/, CLAUDE.md) is relative to whatever cwd that session happens to be rooted in, with nothing re-checking it later. Now: an `## Arguments` table adds a `-- project created` resume flag, and Step 1 unconditionally instructs creating/opening the project and re-invoking from inside it — with an explicit "Do not continue in this session" stop — before any file is written.',
+    ],
+  },
   {
     version: 'v0.4.0',
     date: 'Jul 15, 2026',

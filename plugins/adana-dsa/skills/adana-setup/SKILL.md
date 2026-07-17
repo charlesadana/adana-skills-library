@@ -23,19 +23,38 @@ Walk the user through each step in order. Confirm completion before moving to th
 - User says "set up", "setup", "configure", "install", or "first time"
 - Any skill errors because `GATEWAY_API_KEY` is missing or rejected
 
+## Arguments
+
+| Argument | Meaning |
+|---|---|
+| `-- project created` | User is already inside the project session. **Skip the project-creation prompt** and begin at Step 2. |
+
 ## Step 1 — Cowork project
 
-All skill runs happen inside a **Cowork project**. This is required — setup cannot complete without an active project session.
+All skill runs happen inside a **Cowork project**. This is required — setup cannot complete without an active project session. Every later step (folders in Step 5, `.claude/settings.local.json`, `CLAUDE.md` in Step 6) writes relative to whatever directory the current session is rooted in — nothing re-checks that later. If this session isn't rooted in the user's real Adana working folder, those writes land in the wrong place, and simply re-running setup afterward won't find or repair a misplaced `CLAUDE.md` or `exports/` folder — it will just write another copy wherever the new session happens to be rooted.
 
-Ask the user:
+If this invocation includes `-- project created`, the user has already completed the steps below in the correct session — skip straight to Step 2.
+
+Otherwise, ask the user:
 > Are you running this inside the Cowork project you want to use for Adana day-to-day? Setup will write config here that loads the Adana agent automatically on every session.
 
-If they say no, ask them to:
-1. Look for **Projects** just below the chat input area in Cowork
-2. Click **"Create a new Project"** → **"Use an existing folder"** (point it at their Adana working folder)
-3. Open that project session, then re-run `/adana-dsa:adana-setup`
+A bare "yes" is not enough on its own — if there's any doubt this is a real, already-created project session (e.g. this looks like the first message in a fresh default session, or the user seems unsure what a Cowork project is), treat it as "no."
 
-**Do not continue until the user confirms they are inside the right project.**
+If they say no, or you're unsure, walk them through creating one:
+
+> Let's get your project set up. In Cowork:
+> 1. Look for **Projects** just below the chat input area
+> 2. Click **"Create a new Project"** → **"Use an existing folder"** (point it at their Adana working folder)
+> 3. Name the project (e.g. "Adana")
+
+Once the project is created, ask the user to:
+1. Click the project name to **open its session**
+2. Inside that project session, run:
+   ```
+   /adana-dsa:adana-setup -- project created
+   ```
+
+**Do not continue in this session.** This session's working directory cannot be trusted once the user has needed to create a new project — every write from Step 5 onward depends on being rooted in the correct folder, and setup will resume correctly from Step 2 once re-invoked inside the right session.
 
 ## Step 2 — Gateway API key
 
