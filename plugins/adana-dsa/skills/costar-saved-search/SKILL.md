@@ -2,7 +2,8 @@
 name: costar-saved-search
 description: >-
   Run a CoStar saved search end-to-end for Adana deal sourcing: open it in the
-  logged-in Chrome session, export it with the Industrial saved layout, screen
+  logged-in browser session on the computer Claude controls, export it with the
+  Industrial saved layout, screen
   the listings against the FAR / PLSF / PSFB land-vs-building criteria (via the
   gateway), and persist the deduped properties + broker contacts through the
   Adana gateway. Use this whenever the user names one of their CoStar saved
@@ -11,11 +12,11 @@ description: >-
   casually like "run Montana through CoStar" or "pull the NEW PRODUCT search and
   tell me what fits". If the user mentions a CoStar saved search by name, this
   skill almost certainly applies.
-allowed-tools: Claude in Chrome browser tools (navigate, find, read_page, click, type, screenshot), mcp__gateway__adana_screen_costar, mcp__gateway__adana_ingest_costar_export, mcp__gateway__adana_save_qualification
+allowed-tools: Claude computer (computer use — screenshot, mouse, keyboard), mcp__gateway__adana_screen_costar, mcp__gateway__adana_ingest_costar_export, mcp__gateway__adana_save_qualification
 area: Collection
 use_for: "Run a CoStar saved search, export it (Industrial saved layout), screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + broker contacts, and write back the qualification (score + why + buy-box checklist)."
 deps:
-  mcp: ["Claude in Chrome"]
+  mcp: ["Claude computer (computer use)"]
   gateway: ["adana_screen_costar", "adana_ingest_costar_export", "adana_save_qualification"]
   files: ["exports/CostarExport*.xlsx (read)"]
   env: ["gateway_api_key", "ADANA_EXPORT_DIR"]
@@ -37,15 +38,16 @@ Read `agents/adana.md` first for the gateway connection rules and the
 
 ## Prerequisites
 
-- The user is logged into CoStar in the Chrome instance the browser tools control.
+- The user is logged into CoStar in the browser running on the computer Claude controls.
 - `GATEWAY_API_KEY` is loaded — run `load_credentials()` from CLAUDE.md's **Credential Loading** section before the first `adana_*` call. Scheduled runs do not inject it automatically.
-- Chrome's download location points at the project's `exports/` folder (set by `/adana-dsa:adana-setup` Step 5). Without this the export lands somewhere the skill cannot read.
+- The browser's download location points at the project's `exports/` folder (set by `/adana-dsa:adana-setup` Step 5). Without this the export lands somewhere the skill cannot read.
 
 Set up a task list and **confirm the saved-search name** before driving the browser.
 
 ## Step 1 — Open the saved search
 
-Use the Claude-in-Chrome tools. Identify/create a tab, then:
+Use Claude computer (computer use). Open the browser on the controlled
+computer, then:
 
 1. Go to the **Properties** → **All Properties** search page
    (`https://product.costar.com/search/all-properties`).
@@ -56,9 +58,10 @@ Use the Claude-in-Chrome tools. Identify/create a tab, then:
 The map/results re-render and the property count settles. The count can flash a
 huge number (e.g. "17,001") mid-load — wait for it to settle to the real count.
 
-Tip: screenshots occasionally time out and toolbar buttons can scroll off the
-right edge. The `find` tool is reliable for locating controls by description;
-fall back to it whenever a screenshot fails or a button isn't visible.
+Tip: work from screenshots — take one, locate the control visually, then click
+its coordinates. Toolbar buttons can scroll off the right edge, so scroll the
+toolbar into view before clicking; take a fresh screenshot whenever the page
+re-renders rather than reusing stale coordinates.
 
 Edge case — **no saved search by that name**: the Save dropdown shows what
 exists. If the requested name isn't there, list the available ones and ask which
@@ -67,7 +70,7 @@ they meant.
 ## Step 2 — Export with the Industrial saved layout
 
 **Export the result set; do not read the grid.** A real saved search returns far
-more rows than `read_page` can walk, and a row-by-row read will never finish.
+more rows than the browser tools can walk, and a row-by-row read will never finish.
 The export is the only approach that works at real result-set sizes.
 
 1. Click **More** → **Export**. The "Export Data" dialog opens.
@@ -79,16 +82,16 @@ The export is the only approach that works at real result-set sizes.
    Land Area (AC).
 3. Leave **File type** as "Microsoft Excel File". Click **Export**.
 
-Chrome drops the file into the project's export folder (`$ADANA_EXPORT_DIR`,
-default `exports/`) — `adana-setup` Step 5 pointed Chrome's download
+The browser drops the file into the project's export folder (`$ADANA_EXPORT_DIR`,
+default `exports/`) — `adana-setup` Step 5 pointed the browser's download
 location there. It lands as `CostarExport.xlsx`, or `CostarExport (N).xlsx` if
 earlier copies exist.
 
 Downloading is the intent here, so it's fine to proceed.
 
-If nothing appears in the folder, Chrome's download location is wrong — stop and
-have the user re-run `/adana-dsa:adana-setup` Step 5 rather than falling back to
-scraping the grid.
+If nothing appears in the folder, the browser's download location is wrong — stop
+and have the user re-run `/adana-dsa:adana-setup` Step 5 rather than falling back
+to scraping the grid.
 
 ## Step 3 — Read the export into rows
 
@@ -283,16 +286,16 @@ skill picks them up).
 - **Zero qualifiers**: say so plainly and surface the near-misses.
 - **Export has only a header**: the saved search returned nothing — re-check that
   the right search was opened, rather than reporting "0 properties" as a result.
-- **No `CostarExport*.xlsx` in the folder**: Chrome's download location isn't
+- **No `CostarExport*.xlsx` in the folder**: the browser's download location isn't
   pointing at `exports/`. Stop and have the user re-run
   `/adana-dsa:adana-setup` Step 5. **Do not fall back to reading the grid** — it
   will not finish.
 - **Expected column missing** (e.g. no `RBA`): the wrong layout was chosen —
   almost always the *pre-defined* Industrial rather than the one under **SAVED
   LAYOUTS**. Re-export with the saved layout.
-- **A save dialog appears instead of a download**: Chrome's "Ask where to save
-  each file" is on. That's a native OS dialog and cannot be clicked from here —
-  stop and have the user switch it off.
+- **A save dialog appears instead of a download**: the browser's "Ask where to
+  save each file" is on. That's a native OS dialog and cannot be clicked from
+  here — stop and have the user switch it off.
 - **Gateway key rejected**: stop and ask the user to re-run
   `/adana-dsa:adana-setup` with a valid `adana_live_…` key.
 - **Logged out**: if CoStar shows a sign-in page, stop and ask the user to sign

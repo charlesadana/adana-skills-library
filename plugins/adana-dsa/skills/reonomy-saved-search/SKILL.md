@@ -2,17 +2,17 @@
 name: reonomy-saved-search
 description: >-
   Run a Reonomy saved search for Adana off-market deal sourcing: open it in the
-  logged-in Chrome session, export the results, capture each property's owner /
-  company and full address, and persist them through the Adana gateway as
-  off-market leads (flow2). Use this whenever the user names a Reonomy saved
-  search or asks to "pull Reonomy", "run the off-market search", "get owners for
-  [area]", or refresh Reonomy results. Drives the user's already-logged-in
-  browser via Claude in Chrome.
-allowed-tools: Claude in Chrome browser tools (navigate, find, read_page, click, type, screenshot), mcp__gateway__adana_ingest_reonomy, mcp__gateway__adana_save_qualification
+  logged-in browser session on the computer Claude controls, export the results,
+  capture each property's owner / company and full address, and persist them
+  through the Adana gateway as off-market leads (flow2). Use this whenever the
+  user names a Reonomy saved search or asks to "pull Reonomy", "run the off-market
+  search", "get owners for [area]", or refresh Reonomy results. Drives the user's
+  already-logged-in browser via Claude computer (computer use).
+allowed-tools: Claude computer (computer use — screenshot, mouse, keyboard), mcp__gateway__adana_ingest_reonomy, mcp__gateway__adana_save_qualification
 area: Collection
 use_for: "Run a Reonomy saved search, export it, persist deduped off-market properties + owner contact shells (flow2), and write back a judgment-led qualification."
 deps:
-  mcp: ["Claude in Chrome"]
+  mcp: ["Claude computer (computer use)"]
   gateway: ["adana_ingest_reonomy", "adana_save_qualification"]
   files: ["exports/*.csv (read)"]
   env: ["gateway_api_key", "ADANA_EXPORT_DIR"]
@@ -39,18 +39,18 @@ Read `agents/adana.md` first for the gateway connection rules and the
 
 ## Prerequisites
 
-- The user is logged into Reonomy in the Chrome instance the browser tools control.
+- The user is logged into Reonomy in the browser running on the computer Claude controls.
 - `GATEWAY_API_KEY` is loaded — run `load_credentials()` from CLAUDE.md's **Credential Loading** section before the first `adana_*` call. Scheduled runs do not inject it automatically.
-- Chrome's download location points at the project's `exports/` folder (set by `/adana-dsa:adana-setup` Step 5). Without this the export lands somewhere the skill cannot read.
+- The browser's download location points at the project's `exports/` folder (set by `/adana-dsa:adana-setup` Step 5). Without this the export lands somewhere the skill cannot read.
 
 Confirm the saved-search name (or the search to run) before driving the browser.
 
 ## Step 1 — Open the saved search
 
-Use the Claude-in-Chrome tools. Navigate to Reonomy (`https://app.reonomy.com`),
+Use Claude computer (computer use). Navigate to Reonomy (`https://app.reonomy.com`),
 open the user's **Saved Searches**, and run the one they named. Wait for the
-results list to settle. Prefer `find` / `read_page` to locate controls by label
-rather than fixed coordinates.
+results list to settle. Work from a fresh screenshot to locate controls visually
+before clicking, rather than reusing fixed coordinates.
 
 Edge case — **no saved search by that name**: list the saved searches that exist
 and ask which they meant.
@@ -65,13 +65,13 @@ open, look for an **Export** / **Download** control in the results toolbar or
 under a "⋯" / "More" menu. Choose **CSV**, include the owner columns if the
 dialog offers a column/field selection, and confirm.
 
-Use `find` / `read_page` to locate the control **by label**, not by fixed
-coordinates. If you cannot find an export control at all, **stop and tell the
-user** — do not silently fall back to reading the list row-by-row, which will not
+Locate the control visually from a fresh screenshot, **by its label**, not by
+fixed coordinates. If you cannot find an export control at all, **stop and tell
+the user** — do not silently fall back to reading the list row-by-row, which will not
 finish. Report what you actually saw so this step can be corrected.
 
 The file lands in `$ADANA_EXPORT_DIR` (default `exports/`) — the single folder
-Chrome's download location points at, shared with CoStar. Read it from there.
+the browser's download location points at, shared with CoStar. Read it from there.
 
 ## Step 3 — Read the export into rows
 

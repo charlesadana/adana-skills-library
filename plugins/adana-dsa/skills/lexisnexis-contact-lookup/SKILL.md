@@ -9,12 +9,12 @@ description: >-
   gateway, and drops a CSV deliverable. Use this whenever the user wants to
   "enrich contacts", "find owner emails/phones", "run LexisNexis / Nexis /
   SmartLinx / Accurint", or "skip trace" a list. Drives the user's
-  already-logged-in browser via Claude in Chrome.
-allowed-tools: Claude in Chrome browser tools (navigate, find, read_page, click, type, screenshot, select_option), mcp__gateway__adana_targets_needing_enrichment, mcp__gateway__adana_save_contact_lookups
+  already-logged-in browser via Claude computer (computer use).
+allowed-tools: Claude computer (computer use — screenshot, mouse, keyboard), mcp__gateway__adana_targets_needing_enrichment, mcp__gateway__adana_save_contact_lookups
 area: Enrichment
 use_for: "Pull pending contacts from the gateway (or a spreadsheet), look up phones/emails via LexisNexis SmartLinx, write the results back, and produce a CSV."
 deps:
-  mcp: ["Claude in Chrome"]
+  mcp: ["Claude computer (computer use)"]
   gateway: ["adana_targets_needing_enrichment", "adana_save_contact_lookups"]
   files: ["lexisnexis/results.json (read+write)", "lexisnexis/output_<date>.csv (write)"]
   env: ["gateway_api_key", "LEXISNEXIS_DIR"]
@@ -31,7 +31,7 @@ Read `agents/adana.md` first for the gateway connection rules and the
 
 ## Prerequisites
 
-- Claude in Chrome is connected and a Chrome window is open.
+- Claude computer (computer use) is connected and a browser window is open on the controlled computer.
 - The user is signed into **LexisNexis / Nexis** with **Public Records** access
   (top nav shows a "Public Records" tab). If not, ask them to sign in — never
   enter credentials.
@@ -99,7 +99,7 @@ re-run repeats them. Say so if the user resumes a spreadsheet batch.
 
 ## Step 2 — Open the Person Report form (once)
 
-Get a browser tab, then:
+Open a browser window on the controlled computer, then:
 
 1. Go to `https://advance.lexis.com` (lands on authenticated Nexis home if signed
    in; if it shows the public gateway, the user isn't logged in — stop and ask).
@@ -108,9 +108,10 @@ Get a browser tab, then:
    a Form Search with: SSN, LexID, First Name, Middle Name/Initial, Last Name,
    Street Address, City, State (dropdown), Zip.
 
-Prefer `find` / `read_page` to locate fields by label rather than fixed
-coordinates — layouts shift as the page loads, and stale coordinates are the #1
-cause of mis-typed forms. Screenshot to confirm before and after filling.
+Locate each field visually from a fresh screenshot and click it before typing,
+rather than reusing pixel coordinates across steps — layouts shift as the page
+loads, and stale coordinates are the #1 cause of mis-typed forms. Screenshot to
+confirm before and after filling.
 
 ## Step 3 — Search each person
 

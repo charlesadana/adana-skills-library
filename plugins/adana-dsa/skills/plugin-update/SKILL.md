@@ -4,7 +4,7 @@ description: >-
   Catch an existing Adana workspace up to the latest plugin version — detects
   gaps since the last setup run and fills only what's missing (idempotent).
 area: Setup
-use_for: "Run after a git pull to detect and fill any gaps: missing env vars, unregistered connectors, export folders + Chrome download location, stale CLAUDE.md embed, new skill requirements."
+use_for: "Run after a git pull to detect and fill any gaps: missing env vars, unregistered connectors, export folders + browser download location, stale CLAUDE.md embed, new skill requirements."
 deps:
   mcp: []
   gateway: []
@@ -99,7 +99,7 @@ Read `.claude/settings.local.json` (**search up from cwd** — same lookup the `
 
 If `GATEWAY_API_KEY` is present, do a quick sanity check: verify it starts with `adana_live_` (prefix only — don't call the gateway yet).
 
-### 1a-2. Working folders + Chrome download location (v0.3.0)
+### 1a-2. Working folders + browser download location (v0.3.0)
 
 v0.3.0 replaced grid-scraping with **exports** — the old approach never completed on a real saved search. That makes the export folder load-bearing.
 
@@ -107,11 +107,11 @@ v0.3.0 replaced grid-scraping with **exports** — the old approach never comple
 |---|---|---|
 | `exports/` exists | v0.3.0 | present / missing |
 | `lexisnexis/` exists | v0.3.0 | present / missing |
-| Chrome's download location points at `exports/` | v0.3.0 | **ask the user — cannot be probed** |
+| the browser's download location points at `exports/` | v0.3.0 | **ask the user — cannot be probed** |
 
-The Chrome setting lives on the user's machine, not in the sandbox — there is no way to read it from here. Ask:
+The browser setting lives on the user's machine, not in the sandbox — there is no way to read it from here. Ask:
 
-> Is Chrome's download location (Settings → Downloads → Location) set to this project's `exports/` folder, with "Ask where to save each file" turned **off**?
+> Is the browser's download location (its Settings → Downloads → Location) set to this project's `exports/` folder, with "Ask where to save each file" turned **off**?
 
 **This is the gap most likely to be silently wrong**, and it fails on a Monday morning with nobody watching: CoStar exports fine, the file lands in the user's normal Downloads folder, and the skill sees an empty directory.
 
@@ -150,9 +150,9 @@ For each skill in `skills-manifest.json`, check whether its `deps.env`, `deps.mc
 
 | Skill | Needs | Checked in |
 |---|---|---|
-| `costar-saved-search` | `GATEWAY_API_KEY`, `ADANA_EXPORT_DIR`, Chrome download location, Claude in Chrome | 1a, 1a-2, 1b |
-| `reonomy-saved-search` | `GATEWAY_API_KEY`, `ADANA_EXPORT_DIR`, Chrome download location, Claude in Chrome | 1a, 1a-2, 1b |
-| `lexisnexis-contact-lookup` | `GATEWAY_API_KEY`, `LEXISNEXIS_DIR`, Claude in Chrome | 1a, 1a-2, 1b |
+| `costar-saved-search` | `GATEWAY_API_KEY`, `ADANA_EXPORT_DIR`, browser download location, Claude computer (computer use) | 1a, 1a-2, 1b |
+| `reonomy-saved-search` | `GATEWAY_API_KEY`, `ADANA_EXPORT_DIR`, browser download location, Claude computer (computer use) | 1a, 1a-2, 1b |
+| `lexisnexis-contact-lookup` | `GATEWAY_API_KEY`, `LEXISNEXIS_DIR`, Claude computer (computer use) | 1a, 1a-2, 1b |
 
 As new skills are added with different deps, add rows here.
 
@@ -191,7 +191,7 @@ Connector
 
 Working folders
   ❌ exports/ · lexisnexis/ — not created
-  ❓ Chrome download location — needs your confirmation
+  ❓ browser download location — needs your confirmation
 
 CLAUDE.md
   ⚠️  Version stamp stale (v0.2.2 embedded, v0.4.0 installed)
@@ -204,7 +204,7 @@ Scheduled tasks
 Skills changed since v0.2.2
   ⚠️  costar-saved-search, reonomy-saved-search — now EXPORT instead of scraping
       the results grid (the old approach never completed on a real search).
-      Requires the export folder + Chrome download location above. (v0.3.0)
+      Requires the export folder + browser download location above. (v0.3.0)
   ⚠️  lexisnexis-contact-lookup — now resumable via lexisnexis/results.json,
       and orders phones by listing name so a relative's number can't become the
       primary contact. (v0.3.0)
@@ -233,11 +233,11 @@ Delegate to `/adana-dsa:adana-setup` Step 2. Ask the user to paste the key; writ
 
 Delegate to `/adana-dsa:adana-setup` Step 3. Walk the user through Settings → Connectors → Add custom connector.
 
-### 3b-2. Working folders / Chrome download location missing (v0.3.0)
+### 3b-2. Working folders / browser download location missing (v0.3.0)
 
-Delegate to `/adana-dsa:adana-setup` Step 5 in full — create the two folders, write the two env vars, walk the user through Chrome → Settings → Downloads → Location, and **run the round-trip check** (have them download a file, then confirm it appears in `exports/` from the sandbox).
+Delegate to `/adana-dsa:adana-setup` Step 5 in full — create the two folders, write the two env vars, walk the user through the browser's Settings → Downloads → Location, and **run the round-trip check** (have them download a file, then confirm it appears in `exports/` from the sandbox).
 
-Do not skip the round-trip check just because the folders exist. A folder that exists but that Chrome isn't pointing at looks identical from here, and is exactly the failure that breaks the Monday run.
+Do not skip the round-trip check just because the folders exist. A folder that exists but that the browser isn't pointing at looks identical from here, and is exactly the failure that breaks the Monday run.
 
 ### 3c. CLAUDE.md
 
@@ -333,7 +333,7 @@ Test only the items touched in Step 3.
 - **Gateway connector** — probe `adana_log_run` again and confirm the connector responds.
 - **CLAUDE.md** — read it back and confirm the version stamp matches `installed_version`, and that `## Credential Loading`, `## Workspace Defaults` and `## Workspace Structure` are all present.
 - **Working folders** — confirm both exist and both env vars are set.
-- **Chrome download location** — run the round-trip check: have the user download any small file, then confirm it appears in `exports/` from the sandbox (`os.listdir("exports")`). Asking is not enough; this is the one that silently breaks the scheduled run.
+- **Browser download location** — run the round-trip check: have the user download any small file, then confirm it appears in `exports/` from the sandbox (`os.listdir("exports")`). Asking is not enough; this is the one that silently breaks the scheduled run.
 - **Scheduled tasks** — ask the user to confirm both `Adana · CoStar Collection` and `Adana · LexisNexis Enrichment` now appear in Cowork → Scheduled, and that the legacy `Adana · Weekly Collection` is gone.
 
 Show a result table:

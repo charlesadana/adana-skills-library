@@ -1,6 +1,6 @@
 # adana-skills-library
 
-Claude Code **plugin marketplace** for Adana Capital's automated deal sourcing (DSA). One plugin — **`adana-dsa`** — holds the browser skills that run CoStar / Reonomy saved searches and LexisNexis contact enrichment **under Adana's own authenticated Chrome logins**, persisting everything through the [adana-gateway](https://github.com/charlesadana/adana-gateway) remote MCP server.
+Claude Code **plugin marketplace** for Adana Capital's automated deal sourcing (DSA). One plugin — **`adana-dsa`** — holds the browser skills that run CoStar / Reonomy saved searches and LexisNexis contact enrichment **under Adana's own authenticated browser logins**, persisting everything through the [adana-gateway](https://github.com/charlesadana/adana-gateway) remote MCP server.
 
 This is **repo #2** of the two-repo design (see `adana-gateway/docs/adana-dsa.md`):
 

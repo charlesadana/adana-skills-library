@@ -1,6 +1,6 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.4.1';
-const DEFAULT_DATE = 'Jul 17, 2026';
+const DEFAULT_VERSION = 'v0.5.0';
+const DEFAULT_DATE = 'Jul 18, 2026';
 
 // Export constants initially with default values
 export const APP_VERSION = DEFAULT_VERSION;
@@ -9,6 +9,16 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.5.0',
+    date: 'Jul 18, 2026',
+    changes: [
+      'Switched every browser-driving skill from the Claude in Chrome extension to Claude computer (computer use). The extension drove the user\'s real Chrome via DOM tools (find / read_page / tabs_context); computer use operates the machine via screenshots + mouse/keyboard. Applied across costar-saved-search, reonomy-saved-search, lexisnexis-contact-lookup, the adana routing agent, and the docs/ref-skills copies (costar-saved-search-screen, lexisnexis-contact-lookup).',
+      'DOM-tool guidance flipped to screenshot-driven: "prefer find/read_page to locate controls by label rather than coordinates" became "work from a fresh screenshot, locate visually, then click" — since computer use is inherently screenshot + coordinate based.',
+      'adana-setup Step 4 rewritten — computer use has no browser extension to install: instead of "install the Claude in Chrome extension from the Chrome Web Store", it now confirms computer use is connected and a browser is open on the controlled computer. Step 5 and every "Chrome download location" reference generalized to "browser download location" (the global download-location prerequisite is unchanged).',
+      'plugin-update, SKILLS.md, skills-manifest.json (deps.mcp), README, and skill frontmatter (allowed-tools / deps.mcp) updated in lockstep; registry regenerated. Note: these skills still assume the controlled computer\'s browser is already signed into CoStar / Reonomy / LexisNexis — the "never enter credentials" guardrail is unchanged.',
+    ],
+  },
   {
     version: 'v0.4.1',
     date: 'Jul 17, 2026',

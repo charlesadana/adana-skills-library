@@ -6,7 +6,7 @@
     "description": ">-",
     "deps": {
       "mcp": [
-        "Claude in Chrome"
+        "Claude computer (computer use)"
       ],
       "gateway": [
         "adana_screen_costar",
@@ -30,7 +30,7 @@
     "description": ">-",
     "deps": {
       "mcp": [
-        "Claude in Chrome"
+        "Claude computer (computer use)"
       ],
       "gateway": [
         "adana_ingest_reonomy",
@@ -53,7 +53,7 @@
     "description": ">-",
     "deps": {
       "mcp": [
-        "Claude in Chrome"
+        "Claude computer (computer use)"
       ],
       "gateway": [
         "adana_targets_needing_enrichment",
@@ -73,7 +73,7 @@
   {
     "name": "adana-setup",
     "area": "Setup",
-    "use_for": "Run once to wire up the Adana plugin in a new workspace: gateway API key, connector registration, Claude in Chrome check, export folders + Chrome download location, and CLAUDE.md creation.",
+    "use_for": "Run once to wire up the Adana plugin in a new workspace: gateway API key, connector registration, Claude computer (computer use) check, export folders + browser download location, and CLAUDE.md creation.",
     "description": ">-",
     "deps": {
       "mcp": [],
@@ -86,7 +86,7 @@
   {
     "name": "plugin-update",
     "area": "Setup",
-    "use_for": "Run after a git pull to detect and fill any gaps: missing env vars, unregistered connectors, export folders + Chrome download location, stale CLAUDE.md embed, new skill requirements.",
+    "use_for": "Run after a git pull to detect and fill any gaps: missing env vars, unregistered connectors, export folders + browser download location, stale CLAUDE.md embed, new skill requirements.",
     "description": ">-",
     "deps": {
       "mcp": [],

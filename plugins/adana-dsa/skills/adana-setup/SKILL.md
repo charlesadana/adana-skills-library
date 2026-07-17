@@ -2,11 +2,12 @@
 name: adana-setup
 description: >-
   First-time setup for the Adana deal-sourcing plugin — configure the gateway
-  API key, register the gateway connector, confirm Claude in Chrome, create the
-  export/working folders and point Chrome's download location at them, and write
+  API key, register the gateway connector, confirm Claude computer (computer
+  use), create the export/working folders and point the browser's download
+  location at them, and write
   the workspace CLAUDE.md so adana.md loads automatically on every session.
 area: Setup
-use_for: "Run once to wire up the Adana plugin in a new workspace: gateway API key, connector registration, Claude in Chrome check, export folders + Chrome download location, and CLAUDE.md creation."
+use_for: "Run once to wire up the Adana plugin in a new workspace: gateway API key, connector registration, Claude computer (computer use) check, export folders + browser download location, and CLAUDE.md creation."
 deps:
   mcp: []
   gateway: []
@@ -91,12 +92,12 @@ Ask the user to add it in Cowork:
 
 Ask: "Have you added the gateway connector?" Wait for confirmation before moving on.
 
-## Step 4 — Claude in Chrome
+## Step 4 — Claude computer (computer use)
 
-All three skills drive the user's already-logged-in Chrome session via **Claude in Chrome**. Ask:
-> Is the Claude in Chrome extension installed in Chrome, and is a Chrome window currently open?
+All three skills drive the user's already-logged-in browser via **Claude computer (computer use)** — Claude operates the computer by taking screenshots and issuing mouse/keyboard actions. Ask:
+> Is Claude computer (computer use) connected, and is a browser window open on the computer Claude controls?
 
-If not, direct them to install the Claude in Chrome extension from the Chrome Web Store, open Chrome, and come back.
+If not, direct them to enable computer use and open a browser on that computer, then come back.
 
 Also confirm they know each skill needs the relevant source already signed in before it runs — Claude never enters credentials:
 
@@ -106,11 +107,11 @@ Also confirm they know each skill needs the relevant source already signed in be
 | `reonomy-saved-search` | Reonomy — `app.reonomy.com` |
 | `lexisnexis-contact-lookup` | LexisNexis — `advance.lexis.com` (Public Records access) |
 
-## Step 5 — Project working folders + Chrome download location
+## Step 5 — Project working folders + browser download location
 
 The collection skills **export** from CoStar and Reonomy rather than scraping the results grid — a grid read never completes on a real saved search. That means CoStar's export has to land somewhere the skill can read it.
 
-This is the one step with a foot in two worlds: **Chrome runs on the user's machine; the skill runs in the Cowork sandbox.** The project folder is visible to both, so that's where the export goes.
+This is the one step with a foot in two worlds: **the browser runs on the computer Claude controls; the skill runs in the Cowork sandbox.** The project folder is visible to both, so that's where the export goes.
 
 ### 5a. Create the folders
 
@@ -127,7 +128,7 @@ exports/      — every browser download lands here: CoStar .xlsx, Reonomy .csv
 lexisnexis/   — results.json (resume), output_<date>.csv, optional input sheet
 ```
 
-**One export folder, not one per source.** Chrome has a *single* global download location — it cannot be set per-site. So both CoStar and Reonomy exports land in `exports/`, and the skills tell them apart by filename (`CostarExport*.xlsx` vs Reonomy's `.csv`).
+**One export folder, not one per source.** The browser has a *single* global download location — it cannot be set per-site. So both CoStar and Reonomy exports land in `exports/`, and the skills tell them apart by filename (`CostarExport*.xlsx` vs Reonomy's `.csv`).
 
 ### 5b. Record the paths
 
@@ -144,29 +145,29 @@ Write them into `.claude/settings.local.json` under `env`. Read the file first a
 
 They are also written into `CLAUDE.md` under `## Workspace Defaults` in Step 6 — that copy is what a scheduled run reads with zero lookups. Both are required; `settings.local.json` is the fallback.
 
-### 5c. Point Chrome at the export folder
+### 5c. Point the browser at the export folder
 
 Get the **host-side absolute path** to the project's `exports/` — the path as the user's own machine sees it, not the sandbox path. Ask them for it if you can't determine it (in Cowork the project was created from an existing folder, so they know where it is).
 
 Then:
-> In Chrome: **Settings → Downloads → Location** → set it to `<host path>/exports`
+> In the browser: **Settings → Downloads → Location** → set it to `<host path>/exports`
 >
 > Also make sure **"Ask where to save each file" is OFF.** That toggle opens a native operating-system save dialog, which is not a web page — Claude cannot click it, and it would hang the scheduled Monday run forever.
 
-**This is a global Chrome setting**, so everything they download from now on lands there — not just Adana exports. That's the trade for the export working unattended. Say so plainly; don't let them discover it later.
+**This is a global browser setting**, so everything they download from now on lands there — not just Adana exports. That's the trade for the export working unattended. Say so plainly; don't let them discover it later.
 
 ### 5d. Confirm the round-trip
 
 Do not take this on trust — it is the single most likely thing to be silently wrong, and it fails on a Monday morning with nobody watching.
 
-Ask the user to download any small file in Chrome. Then check that it appears in the export folder from the sandbox:
+Ask the user to download any small file in the browser. Then check that it appears in the export folder from the sandbox:
 
 ```python
 import os
 print(os.listdir(os.environ.get("ADANA_EXPORT_DIR", "exports")))
 ```
 
-If the file isn't there, Chrome's download location is pointing at a folder the sandbox can't see. Stop and fix it before continuing — every collection run depends on this.
+If the file isn't there, the browser's download location is pointing at a folder the sandbox can't see. Stop and fix it before continuing — every collection run depends on this.
 
 ## Step 6 — Create workspace CLAUDE.md
 
@@ -282,7 +283,7 @@ Run this **before** reading `GATEWAY_API_KEY`. Every `adana_*` tool call takes i
 
 Hardcoded here at setup time so any session — including a scheduled run — has them immediately, with no env lookup. They are also mirrored into `.claude/settings.local.json` `env` as a fallback.
 
-- **Exports:** `exports/` (env: `ADANA_EXPORT_DIR`) — **Chrome's download location points here.** Both CoStar and Reonomy exports land in this one folder; Chrome has only a single global download location, so they are told apart by filename.
+- **Exports:** `exports/` (env: `ADANA_EXPORT_DIR`) — **the browser's download location points here.** Both CoStar and Reonomy exports land in this one folder; the browser has only a single global download location, so they are told apart by filename.
 - **LexisNexis working dir:** `lexisnexis/` (env: `LEXISNEXIS_DIR`)
 
 **Fallback rule:** if a value above looks empty or stale (e.g. this `CLAUDE.md` was copied from another workspace), run the credential loader and read from env instead:
@@ -291,7 +292,7 @@ Hardcoded here at setup time so any session — including a scheduled run — ha
 
 ## Workspace Structure
 
-    exports/            — Chrome's download location; every export lands here
+    exports/            — the browser's download location; every export lands here
       ├─ CostarExport*.xlsx   — CoStar (Industrial saved layout)
       └─ *.csv                — Reonomy
     lexisnexis/
@@ -360,8 +361,8 @@ Then tell the user plainly:
 Summarise what was configured:
 - Gateway API key saved to `.claude/settings.local.json`
 - Gateway connector registered
-- Claude in Chrome confirmed
-- Working folders created (`exports/`, `lexisnexis/`); Chrome's download location points at `exports/` (round-trip verified)
+- Claude computer (computer use) confirmed
+- Working folders created (`exports/`, `lexisnexis/`); the browser's download location points at `exports/` (round-trip verified)
 - CLAUDE.md created — Adana agent + credential loader + workspace defaults
 - Two weekly tasks scheduled for Mondays: `Adana · CoStar Collection`, then `Adana · LexisNexis Enrichment`. Reonomy runs on demand.
 
