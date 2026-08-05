@@ -274,12 +274,35 @@ Rules:
 - The gateway stores this verbatim; your overlay **supersedes the gateway's own
   deterministic screen** on the dashboard card. Batch all rows into one call.
 
+### Scoring is not promoting — expect `held`
+
+Score **every** property you ingested, including the no-broker ones. You are the
+only reader who will ever have the CoStar row, the listing, the brochure and the
+map open at once; that judgment is captured now or lost.
+
+But scoring does not move a property into Gate 1. **The gateway will not promote
+a property to `qualified` while it has no usable contact** (no email and no
+mobile) — it stores your overlay and leaves the status at `needs_enrichment`,
+returning that address in **`held`**. It qualifies later, once
+`lexisnexis-contact-lookup` supplies a contact.
+
+So on a run where the saved layout carried no broker columns and you opened few
+brochures, a `held` count close to your item count is the **correct** outcome,
+not a failure. Gate 1 approves outreach; a property nobody can contact does not
+belong in it. Never try to work around a hold — the `pipeline_status` override is
+gated too, and attempting one just misreports the pipeline.
+
 ## Reporting back
 
 Tight summary: qualifier count + names, near-misses, no-price count, the ingest
-counts (`new` / `updated`), and how many properties you qualified (`saved`).
-Mention that no-price/no-broker rows were routed to enrichment (the LexisNexis
-skill picks them up).
+counts (`new` / `updated`), and how many properties you scored (`saved`).
+
+**Report `saved` and `held` separately — never as one number.** `saved` is how
+many overlays were stored; `saved - held` is how many actually reached Gate 1.
+Say it plainly, e.g. "scored 181, 181 held for enrichment — 0 in Gate 1 until
+LexisNexis runs". Reporting `saved` alone implies a Gate 1 queue that does not
+exist. Mention that no-price/no-broker rows were routed to enrichment (the
+LexisNexis skill picks them up).
 
 ## Edge cases
 

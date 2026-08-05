@@ -1,5 +1,5 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.5.1';
+const DEFAULT_VERSION = 'v0.5.2';
 const DEFAULT_DATE = 'Aug 5, 2026';
 
 // Export constants initially with default values
@@ -9,6 +9,18 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.5.2',
+    date: 'Aug 5, 2026',
+    changes: [
+      'Documents the gateway\'s new Gate 1 precondition (adana-gateway v2.3.0): entering `qualified` requires a usable contact, so `adana_save_qualification` stores the overlay but holds the promotion for a property with no email and no mobile, returning it in a new `held` array. This closes a contradiction inside this plugin: costar-saved-search Step 7 said "build one qualification per property you ingested" and write it back immediately, while adana-setup Step 7 and agents/adana.md describe the pipeline as needs_enrichment → enriched → qualified with the gateway qualifying after enrichment. On Aug 5 a CoStar run followed Step 7 literally and promoted 181 contactless properties straight into Gate 1.',
+      'costar-saved-search: new "Scoring is not promoting — expect `held`" section under Step 7. Keeps the instruction to score every ingested property — the agent is the only reader who ever has the CoStar row, listing, brochure and map open at once, so that judgment is captured then or lost — but states plainly that scoring does not move a property into Gate 1, that a high `held` count on a no-broker run is the correct outcome rather than a failure, and that the `pipeline_status` override is gated too so there is nothing to work around.',
+      'costar-saved-search "Reporting back": `saved` and `held` must now be reported separately, never as one number — `saved - held` is what actually reached Gate 1. Reporting `saved` alone implies a Gate 1 queue that does not exist, which is exactly how the 181 went unnoticed.',
+      'reonomy-saved-search: Step 5 now states that every off-market lead should be expected back in `held` — Reonomy ingest creates an owner contact shell with no email or phone, so the hold is the designed path for flow2, not an error. Reporting back updated to say these are scored but not yet in Gate 1.',
+      'agents/adana.md: the pipeline section now states that the arrows are the gateway\'s to enforce, not the agent\'s to shortcut, and the adana_save_qualification row in the tool table documents the hold and the `held` return.',
+      'No behavioural change to the browser-driving steps; computer use is unchanged in this release.',
+    ],
+  },
   {
     version: 'v0.5.1',
     date: 'Aug 5, 2026',

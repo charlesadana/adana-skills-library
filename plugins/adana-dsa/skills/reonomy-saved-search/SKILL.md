@@ -152,12 +152,22 @@ off-market leads land **`REVIEW`** (pursue the owner for a number) unless the
 strategic fit is strong enough for `PURSUE`. The gateway stores it verbatim and
 surfaces it on the property card.
 
+**Expect every one of these to come back in `held`.** Reonomy ingest creates an
+owner contact *shell* with no email or phone — those arrive later from
+`lexisnexis-contact-lookup`. The gateway will not promote a property to
+`qualified` without a usable contact, so it stores your overlay and leaves the
+status at `needs_enrichment`. That is the designed path for off-market leads, not
+an error: score them now while you have the record in front of you, and they
+enter Gate 1 after enrichment.
+
 ## Reporting back
 
 Tight summary: how many owners/properties captured, the ingest counts
-(`new` / `updated`), and how many you qualified (`saved`). Note that these are now
-queued for contact enrichment (the `lexisnexis-contact-lookup` skill picks them
-up via `adana_targets_needing_enrichment`).
+(`new` / `updated`), and how many you scored (`saved`) — reporting `held`
+alongside it, which for Reonomy will normally equal `saved`. Say that these are
+scored but not yet in Gate 1: they are queued for contact enrichment (the
+`lexisnexis-contact-lookup` skill picks them up via
+`adana_targets_needing_enrichment`) and enter Gate 1 once a contact lands.
 
 ## Edge cases
 
