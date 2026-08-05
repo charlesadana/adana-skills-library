@@ -1,18 +1,18 @@
 ---
 name: lexisnexis-contact-lookup
 description: >-
-  Enrich Adana's pending contacts with phone numbers and email addresses using
+  Find the missing EMAIL for Adana's contacts (and any missing phone) using
   LexisNexis Public Records (the SmartLinx Comprehensive Person Report). Takes
-  the work list from the Adana gateway (the owners and no-broker listings still
-  missing details) or from a spreadsheet the user names, runs each person through
-  the report in the user's logged-in browser, writes the results back through the
-  gateway, and drops a CSV deliverable. Use this whenever the user wants to
-  "enrich contacts", "find owner emails/phones", "run LexisNexis / Nexis /
-  SmartLinx / Accurint", or "skip trace" a list. Drives the user's
+  the work list from the Adana gateway — every contact that still has no email,
+  whatever its property's pipeline status — or from a spreadsheet the user names,
+  runs each person through the report in the user's logged-in browser, writes the
+  results back through the gateway, and drops a CSV deliverable. Use this whenever
+  the user wants to "enrich contacts", "find owner emails/phones", "run LexisNexis
+  / Nexis / SmartLinx / Accurint", or "skip trace" a list. Drives the user's
   already-logged-in browser via Claude computer (computer use).
 allowed-tools: mcp__gateway__adana_targets_needing_enrichment mcp__gateway__adana_save_contact_lookups
 area: Enrichment
-use_for: "Pull pending contacts from the gateway (or a spreadsheet), look up phones/emails via LexisNexis SmartLinx, write the results back, and produce a CSV."
+use_for: "Pull every contact still missing an email from the gateway (or a spreadsheet), look up emails/phones via LexisNexis SmartLinx, write the results back, and produce a CSV."
 deps:
   mcp: ["Claude computer (computer use)"]
   gateway: ["adana_targets_needing_enrichment", "adana_save_contact_lookups"]
@@ -22,9 +22,12 @@ deps:
 
 # LexisNexis contact lookup → write back
 
-Enriches the contacts Adana already has but can't reach yet — owners from Reonomy
-and no-broker CoStar listings (flow2 + flow3). Results are **written back through
-the gateway**, and a CSV deliverable is left in the working folder.
+**The job is the email.** Adana reaches people by email through Instantly, and an
+email is the one detail its sources rarely supply — CoStar gives phones, Reonomy
+gives owner shells. So this skill works one list: **every contact that still has
+no email**, whether that's a Reonomy owner, a no-contact CoStar listing, or a
+broker whose phone is already known. Results are **written back through the
+gateway**, and a CSV deliverable is left in the working folder.
 
 Read `agents/adana.md` first for the gateway connection rules and the
 `${GATEWAY_API_KEY}` convention.
@@ -52,10 +55,25 @@ declaration to make, not something to toggle.
 adana_targets_needing_enrichment(gateway_api_key: "${GATEWAY_API_KEY}", limit: 100)
 ```
 
-Returns one entry per pending contact:
-`{ contact_id, first_name, last_name, contact_type, address, city, state }`.
+Returns one entry per contact still missing an email, least-recently-attempted
+first:
+`{ contact_id, first_name, last_name, contact_type, address, city, state,
+has_mobile, already_attempted, property_status }`.
 Keep the `contact_id` with each person — you need it to write results back. If the
 list is empty, say there's nothing pending and stop.
+
+**The work list is "no email yet" — nothing to do with pipeline status.** A
+property can already be `qualified` (it had a phone, which is enough to reach
+Gate 1) and still appear here, because Instantly sends email and it hasn't got
+one. That is intended: the goal is an email for every contact. Disqualified
+properties are the only ones excluded.
+
+- **`has_mobile: true`** — the phone is already known, so **only the email is
+  missing**. Don't spend the run re-collecting numbers; if the report shows no
+  email, that person's lookup added nothing.
+- **`already_attempted: true`** — a previous run looked and found no email. These
+  sort to the back and are retried, so a long run may revisit people. Pass
+  `include_attempted: false` to work only fresh contacts.
 
 **Alternative — from a spreadsheet**, when the user names one (an ad-hoc list not
 yet in the pipeline). Read the xlsx/csv and map its columns onto
@@ -66,17 +84,29 @@ the gateway — they produce the CSV only. Say so before starting.
 
 If the list is large (say >25), tell the user roughly how long it'll take (each
 lookup is ~10–20s of browser work) and confirm before charging ahead — each report
-may incur account usage.
+may incur account usage. **The list can be hundreds** now that CoStar contributes
+a contact per listing; at ~15s each, 100 people is ~25 minutes and 500 is over
+two hours. Agree a `limit` up front rather than starting an open-ended run. The
+ordering is least-recently-attempted first, so a capped run always works the
+most-neglected contacts and the rest come round on the next run.
 
 ### Resume a previous run
 
-Before starting, load `$LEXISNEXIS_DIR/results.json` if it exists and **skip
-anyone already in it**. A batch of 100 is 20–30 minutes of browser work; without
-this, a timeout at person #97 loses all 97, and on the scheduled Monday run nobody
-is watching.
+`results.json` exists so a crash at person #97 doesn't lose the first 96 — a
+batch of 100 is 20–30 minutes of browser work, and on a scheduled run nobody is
+watching.
+
+**It must not outlive the run it belongs to.** The work list now *deliberately*
+returns people a previous run failed to find an email for, so they get another
+try. A `results.json` that persists across runs would put every one of them in
+`done` and skip them forever — silently defeating the retry. So the file is
+**rotated when it's stale**: an entry from a run that has already finished is
+archived rather than treated as done.
 
 ```python
-import json, os
+import json, os, datetime
+
+STALE_AFTER_HOURS = 6      # longer than any single batch, shorter than any gap between runs
 
 # work_list = the people from Step 1 (gateway targets, or the spreadsheet rows)
 lex_dir = os.environ.get("LEXISNEXIS_DIR", "lexisnexis")
@@ -85,13 +115,21 @@ results_path = os.path.join(lex_dir, "results.json")
 
 results = []
 if os.path.exists(results_path):
-    with open(results_path, encoding="utf-8") as f:
-        results = json.load(f)
+    age_h = (datetime.datetime.now().timestamp() - os.path.getmtime(results_path)) / 3600
+    if age_h > STALE_AFTER_HOURS:
+        # A finished run, not an interrupted one — archive it and start clean, or
+        # everyone it already tried would be skipped for good.
+        stamp = datetime.datetime.fromtimestamp(os.path.getmtime(results_path)).strftime("%Y%m%d_%H%M")
+        os.rename(results_path, os.path.join(lex_dir, f"results_{stamp}.json"))
+        print(f"Archived results.json from {stamp} ({age_h:.0f}h old) — starting a fresh run.")
+    else:
+        with open(results_path, encoding="utf-8") as f:
+            results = json.load(f)
 
 done = {r.get("contact_id") for r in results if r.get("contact_id")}
 todo = [p for p in work_list if p.get("contact_id") not in done]
 if results:
-    print(f"Resuming — {len(done)} already done, {len(todo)} to go.")
+    print(f"Resuming — {len(done)} already done this run, {len(todo)} to go.")
 ```
 
 Spreadsheet rows have no `contact_id`, so they can't be deduped this way — a
@@ -115,12 +153,45 @@ confirm before and after filling.
 
 ## Step 3 — Search each person
 
-For each contact still on the list:
+### First: is this an owner or a broker?
+
+The work list returns `contact_type`, and it changes how you search. **The
+`address` field is always the *property's* address, not the person's.**
+
+- **`owner`** — the property address is a genuine signal (they own it, often live
+  at or near it). Use it. This is the case the workflow was designed for.
+- **`broker`** — a listing agent does **not** live at the property. Filling the
+  Street Address field with it produces confident-looking wrong matches. Search
+  on **name + state only**, treat the result as low confidence, and set `notes`
+  to `"broker — address is the listing, not the person"`.
+
+**Run both types — the goal is an email for every contact.** Don't skip brokers.
+Do set expectations: a Public Records person report indexes *individuals*, so it
+finds personal emails well and brokerage work emails poorly. If broker rows come
+back consistently empty, say so and suggest the brokerage website as a better
+source for those — but that's a recommendation to the user, not a reason to leave
+them un-attempted.
+
+### `has_mobile: true` — do not overwrite a good phone
+
+Most contacts arrive with a phone already (CoStar supplies one per listing) and
+are here **only** for the email. For those, `phones[0]` from a person report can
+*replace* a number that came straight off the listing — a clear downgrade if the
+match is imperfect.
+
+So when `has_mobile` is true: **omit `phones` from the write-back entirely**
+unless the report's phone is both listing-name-matched to the contact and clearly
+the same person. Send the email and nothing else. Record the phones in
+`results.json` and the CSV either way — that costs nothing and keeps the audit
+trail.
+
+### Then, for each contact still on the list:
 
 1. Fill **First Name**, **Last Name**, **City**, **Street Address** where you have
    values — and **Middle Name/Initial** when you have one. More fields mean fewer
    false matches. *(The gateway work list carries no middle name — `contacts` has
-   no such column — so this only applies to spreadsheet input.)*
+   no such column — so this only applies to spreadsheet input.)* Per the rule
+   above, **skip Street Address entirely for `broker` rows.**
 2. Set the **State** dropdown: click it, type the full state name (e.g. `Texas`)
    so the native select jumps to it; verify via screenshot.
 3. Click **Search**.
@@ -143,8 +214,9 @@ tells them apart.
 
 This matters far more here than it did on the old spreadsheet workflow. The
 gateway stores exactly **one** `mobile` per contact and takes **`phones[0]`**, and
-that number is later bulk-loaded into the Instantly outreach campaign. If a
-spouse's number is first in your list, Adana cold-contacts the spouse.
+that number is what any SMS outreach would use. If a spouse's number is first in
+your list, Adana cold-contacts the spouse — and per the rule above, on a
+`has_mobile` contact it would also have destroyed a good number to do it.
 
 So:
 - Record **every** phone on the report, but **order them so numbers whose listing
@@ -200,10 +272,19 @@ is why Step 3's ordering rule is load-bearing. Fold the `result_count` into
 `notes` when it signals low confidence (e.g. a single weak match, or dozens);
 the gateway has no separate field for it.
 
-The gateway writes the primary email + mobile onto each contact, sets
-`enrichment_status` (`enriched` if any detail was found, else `not_found`), and
-promotes the contact's property from `needs_enrichment` → `enriched`. Relay the
-returned `{run_id, enriched, not_found}`.
+**Omit a field you didn't find rather than sending an empty list.** The gateway
+only writes the values you supply, so leaving `phones` off preserves the phone
+CoStar already provided; sending a phone you're unsure about overwrites it.
+
+The gateway writes what you supply onto each contact and promotes the contact's
+property from `needs_enrichment` → `enriched`. Relay the returned
+`{run_id, enriched, not_found, phone_only}`.
+
+**`enrichment_status` becomes `enriched` only when an EMAIL was found.** A
+phone-only result counts as `phone_only`: real progress, but the contact stays on
+the work list for a future attempt, because the email is still missing. Report
+`phone_only` explicitly — *"9 enriched, 3 found phones only (still no email), 2
+no results"* — rather than folding it into the enriched count.
 
 Spreadsheet-sourced rows have no `contact_id` — skip them here; they still land in
 the CSV.
@@ -255,18 +336,28 @@ wherever the listing name allowed that call.
 
 ## Reporting back
 
-One-line summary, e.g. *"12 of 14 enriched; 2 had no results, and 1 has phones
-that may belong to relatives — all flagged in Notes."* Name the CSV path. Don't
-dump every number into chat.
+One-line summary built from the gateway's counts, e.g. *"14 looked up: 9 emails
+found, 3 phones only (still no email, back on the list), 2 no results; 1 has
+phones that may belong to relatives — flagged in Notes."* Name the CSV path.
+Don't dump every number into chat.
 
-Call out the relatives flag explicitly if it fired — that's the one that puts
-outreach in front of the wrong person.
+Two things to state explicitly rather than bury:
+- **`phone_only`** — these did not get what they came for and remain on the work
+  list. Reporting them as "enriched" overstates the run.
+- **the relatives flag**, if it fired — that's the one that puts outreach in
+  front of the wrong person.
+
+If you worked a capped list, say how many contacts are still outstanding so the
+user knows another run is due.
 
 ## Edge cases
 
-- **Empty work list**: nothing pending — stop.
-- **`results.json` already complete**: everyone on the list is done. Offer to
-  re-run from scratch (delete the file) or just regenerate the CSV.
+- **Empty work list**: every contact already has an email — stop and say so.
+- **`results.json` already covers the whole list**: this run is finished. Just
+  regenerate the CSV; don't re-look-up. To force a fresh pass, delete the file.
+- **A run that finds no emails at all**: not necessarily a failure — it may mean
+  the list is mostly brokers, whose work emails Public Records doesn't index. Say
+  which contact types you worked before concluding the tool is broken.
 - **Gateway key rejected**: stop and ask the user to re-run
   `/adana-dsa:adana-setup` with a valid `adana_live_…` key.
 - **Logged out of LexisNexis**: stop and ask the user to sign in.

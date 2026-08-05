@@ -1,6 +1,6 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.5.2';
-const DEFAULT_DATE = 'Aug 5, 2026';
+const DEFAULT_VERSION = 'v0.5.3';
+const DEFAULT_DATE = 'Aug 6, 2026';
 
 // Export constants initially with default values
 export const APP_VERSION = DEFAULT_VERSION;
@@ -9,6 +9,22 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.5.3',
+    date: 'Aug 6, 2026',
+    changes: [
+      'costar-saved-search read 8 columns out of a 39-column export and dropped the rest — including the entire contact block. The Aug 5 exports carried `Sales Contact` (~83% filled), `Sales Contact Phone` (~83%), `True Owner Name` (~71%), `True Owner Contact` (~47%) and `True Owner Phone` (~66%), and none of it was mapped. Step 3 now extracts a contact per listing: the listing broker when the export names one with a way to reach them, the owner otherwise. Verified by executing the skill\'s own code block against the three original export files — 18 of 20 listings on the smallest, 485 of 516 across all three.',
+      'Step 5 was the instruction that caused it. It claimed "the Industrial saved layout carries the listing, not the broker" and sent the agent to open a brochure per row for data that was already in the spreadsheet — and it named columns ("Listing Broker Name" / "Listing Broker Phone") that do not exist in the layout. It is now a no-browser step that documents the real column names and explicitly forbids visiting a brochure for contacts.',
+      'Corrected an overgeneralisation introduced while fixing the above: "CoStar exports carry phones and never emails" was a claim about ONE saved layout observed in one 534-row sample, not a property of CoStar. Layouts are configurable. The code now discovers email columns from the actual header (`EMAIL_COLS`, classified broker/owner/other), prefers an email when it finds one since email is the outreach channel, and prints `email columns found: none in this layout` rather than assuming. The skill notes that adding an email field to the saved layout is the highest-value change available to this pipeline.',
+      'Three bugs in the new Step 3 code, caught by a top-to-bottom re-read and fixed before shipping: phone columns come back from Excel as int or float, so `str()` on a float produced "7702998083.0" — a non-phone that would have been stored on hundreds of contacts (now normalised to E.164, matching the gateway); the sample code built dicts full of `None` from missing columns while the surrounding prose warned that ingest rejects nulls (added `clean()`, since the schema accepts a missing key but not an explicit null); and `split_name(None)` yielded the literal string "None" as a first name. Rows with no address are now skipped rather than sent.',
+      'Step 6 now documents the `contacts` count the gateway returns and instructs the agent to compare it against the count Step 3 printed — a silent zero is exactly how 485 contacts were lost. Its example no longer advertises an `email` field the layout may not have, or `source_url`/`brochure_url`/`external_id` which the Industrial layout does not carry. Stale references to having "the brochure" open were removed from Step 7 and the Reporting section, since Step 5 now forbids opening one.',
+      'lexisnexis-contact-lookup: the work list is no longer "pending contacts" but "every contact that still has no email", regardless of pipeline status — a property that reached `qualified` on the strength of a mobile still needs an email. Documents the new `has_mobile`, `already_attempted` and `property_status` fields, the `include_attempted` flag, and the `phone_only` count, which must be reported separately rather than folded into `enriched`.',
+      'Fixed a bug that patch introduced: `results.json` skips anyone already in it, which is right for resuming a crashed run but wrong across runs — the widened work list deliberately returns people a previous run failed to find an email for, and every one of them would have been in `done` and skipped forever, silently defeating the retry. The file now rotates: older than 6 hours means a finished run, so it is archived and everyone gets another pass. Both branches verified by executing the skill\'s code.',
+      'Reversed the "prioritise owner rows, skip brokers" advice added in the same pass — it contradicted the goal of finding an email for every contact. Both types are now worked; the skill instead sets expectations that Public Records indexes individuals and so finds brokerage work emails poorly, and suggests the brokerage website as a better source without leaving anyone un-attempted.',
+      'New rule for `has_mobile` contacts: most now arrive with a phone and are on the list only for the email, so `phones[0]` from a person report could REPLACE a number that came straight off the listing. The skill now says to omit `phones` from the write-back unless the report\'s number is listing-name-matched to the contact. Also corrected a pre-existing inaccuracy — the stored mobile feeds SMS, not the Instantly email campaign.',
+      'agents/adana.md: "drive the browser for a broker\'s email on a brochure" replaced with "read the whole export before going anywhere else for data"; adds that a phone is a contact and that column layouts must be read, never assumed.',
+    ],
+  },
   {
     version: 'v0.5.2',
     date: 'Aug 5, 2026',

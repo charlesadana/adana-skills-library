@@ -116,15 +116,88 @@ if len(rows) < 2:
 
 header = rows[0]
 idx = {name: i for i, name in enumerate(header) if name}
-print(list(idx))   # inspect the real columns — Step 5 checks these for broker fields
+print(list(idx))   # inspect the real columns before mapping — see the table below
 
 def cell(r, col):
     i = idx.get(col)
     return r[i] if i is not None else None
 
-listings = []
+def phone_str(v):
+    """Excel hands phone columns back as numbers: 7702998083 (int) or
+    7702998083.0 (float). str() on the float yields '7702998083.0', which is not
+    a phone number. Normalise to digits, then to E.164 so every row stores the
+    same shape."""
+    if v is None or str(v).strip() == "":
+        return None
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    digits = "".join(ch for ch in str(v) if ch.isdigit())
+    if len(digits) == 10:
+        return f"+1{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    return str(v).strip() or None     # unparseable: keep it rather than lose it
+
+def split_name(n):
+    """'Frank Martone' -> ('Frank', 'Martone'). Suffixes stay on the last name."""
+    parts = str(n or "").split()
+    if not parts:
+        return (None, None)
+    return (parts[0], " ".join(parts[1:])) if len(parts) > 1 else (parts[0], None)
+
+# Find email columns from the REAL header rather than assuming which exist — a
+# layout can be configured to include them, and an email is worth more than a
+# phone (it's the Instantly channel). Never assume they're absent; look.
+EMAIL_COLS = [c for c in idx if "email" in str(c).lower()]
+BROKER_EMAIL = [c for c in EMAIL_COLS
+                if any(h in str(c).lower() for h in ("sale", "broker", "listing", "agent"))]
+OWNER_EMAIL  = [c for c in EMAIL_COLS if "owner" in str(c).lower()]
+OTHER_EMAIL  = [c for c in EMAIL_COLS if c not in BROKER_EMAIL and c not in OWNER_EMAIL]
+print(f"email columns found: {EMAIL_COLS or 'none in this layout'}")
+
+def first_val(r, cols):
+    for c in cols:
+        v = cell(r, c)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return None
+
+def contact_for(r):
+    """The listing broker if the export gives a way to reach one, else the owner.
+
+    Reachable means an email OR a phone — either is enough for the gateway to
+    store the contact and let the property reach Gate 1. One contact per listing:
+    the gateway keys contacts on (property_id, email) with NULLS NOT DISTINCT, so
+    a property can hold only ONE contact that has no email."""
+    sales = cell(r, "Sales Contact")
+    sales_email = first_val(r, BROKER_EMAIL) or first_val(r, OTHER_EMAIL)
+    sales_phone = phone_str(cell(r, "Sales Contact Phone"))
+    if sales and (sales_email or sales_phone):
+        first, last = split_name(sales)
+        return {"first_name": first, "last_name": last, "email": sales_email,
+                "mobile": sales_phone, "title": "Listing broker", "contact_type": "broker"}
+
+    owner_email = first_val(r, OWNER_EMAIL)
+    owner_phone = phone_str(cell(r, "True Owner Phone"))
+    if owner_email or owner_phone:
+        first, last = split_name(cell(r, "True Owner Contact"))
+        c = {"email": owner_email, "mobile": owner_phone,
+             "title": "Owner", "contact_type": "owner"}
+        if first:
+            c["first_name"], c["last_name"] = first, last
+        if cell(r, "True Owner Name"):
+            c["company"] = cell(r, "True Owner Name")
+        return c
+    return None
+
+def clean(d):
+    """ingest's schema is `.optional()`, which accepts a MISSING key but rejects
+    an explicit null. Strip empties instead of passing them through."""
+    return {k: v for k, v in d.items() if v is not None and str(v).strip() != ""}
+
+listings, skipped = [], 0
 for r in rows[1:]:
-    listings.append({
+    l = clean({
         "address_raw":    cell(r, "Property Address"),
         "city":           cell(r, "City"),
         "state":          cell(r, "State"),
@@ -134,15 +207,53 @@ for r in rows[1:]:
         "building_sf":    cell(r, "RBA"),
         "lot_size_acres": cell(r, "Land Area (AC)"),
     })
+    if not l.get("address_raw"):        # the dedup key — a row without it can't be stored
+        skipped += 1
+        continue
+    c = contact_for(r)
+    if c:
+        l["broker"] = clean(c)
+    listings.append(l)
+
+with_contact = sum(1 for l in listings if l.get("broker"))
+with_email   = sum(1 for l in listings if l.get("broker", {}).get("email"))
+print(f"{len(listings)} listings, {with_contact} with a contact "
+      f"({with_email} of them with an email), {skipped} skipped (no address)")
 ```
 
-Print the header before mapping. Column names vary with the saved layout, and
-Step 5 needs to know whether broker columns came down with the export. If `RBA`
+**Remember `with_contact`** — Step 6 checks the gateway's `contacts` count against it.
+
+Print the header before mapping. Column names vary with the saved layout. If `RBA`
 or `Land Area (AC)` is missing entirely, the **wrong layout** was chosen — almost
 always the pre-defined Industrial rather than the one under SAVED LAYOUTS.
 
-Drop any field the export doesn't have rather than sending `null` — `ingest`
-rejects nulls.
+**The contact columns are in the export — read them.** The Industrial saved
+layout ships ~39 columns, and the contact block is easy to miss because the
+names don't say "broker". Fill rates below are from one 534-row run (Aug 2026),
+so treat them as a rough guide, not a spec:
+
+| Column | What it is | Filled in that sample |
+|---|---|---|
+| `Sales Contact` | the listing broker's name | ~83% |
+| `Sales Contact Phone` | that broker's phone | ~83% |
+| `Sale Company Contact` | duplicate of `Sales Contact` — ignore it | ~83% |
+| `True Owner Name` | the owning entity (company / trust) | ~71% |
+| `True Owner Contact` | a person at the owner | ~47% |
+| `True Owner Phone` | the owner's phone | ~66% |
+| `Leasing Company Name` / `Contact` | leasing agent, not the seller — ignore | ~30% |
+
+**An email is worth more than a phone — always check whether the layout has one.**
+That sample had no email column, but that is a fact about one saved layout, not
+about CoStar: layouts are configurable and a different one may well carry email.
+The code above discovers email columns from the header instead of assuming, and
+prefers an email when it finds one. If `email columns found: none in this layout`
+prints on a run where you expected emails, say so — adding an email field to the
+saved layout is the single highest-value change available to this pipeline,
+because email is the Instantly channel.
+
+`clean()` above is what keeps `ingest` happy: its schema marks fields
+`.optional()`, which accepts a **missing key** but rejects an explicit `null`.
+Never hand-build a listing dict that passes `null` through.
 
 Map the columns exactly as above — `For Sale Price` → `asking_price`, `RBA` →
 `building_sf`, `Land Area (AC)` → `lot_size_acres`. Without RBA **and** acres the
@@ -173,64 +284,76 @@ PSFB < $120), dedupes by address+city, and returns `qualifiers`, `near_misses`
 name the qualifiers with their FAR band and the metric that cleared, call out
 near-misses, and note how many rows had no price. Don't restate every property.
 
-## Step 5 — Brokers (browser)
+## Step 5 — Contacts (already done in Step 3)
 
-The Industrial saved layout carries the **listing**, not the broker. So broker
-details come from one of two places:
+**The export is the source of contacts. There is no browser work in this step.**
+Step 3's `contact_for()` already pulled the broker (or the owner) out of the
+columns, and the count it printed is what will land.
 
-1. **From the export**, if the saved layout happens to include broker columns
-   (e.g. "Listing Broker Name" / "Listing Broker Phone"). Check the header you
-   printed in Step 3 — if they're there, use them and skip the browser.
-2. **From the brochure**, otherwise. Open the listing in CoStar, open its
-   brochure, and read off `first_name`, `last_name`, **`email`**, `mobile`,
-   `company`. Capture the `brochure_url` too.
+**The rule is `email || mobile`.** Either one makes the contact real, gets it
+stored, and lets the property reach Gate 1. A listing with neither goes to
+`needs_enrichment`, where `lexisnexis-contact-lookup` picks it up. On one run
+(516 listings, Aug 2026) the sales column covered ~86%, the owner fallback took
+it to **~94%**, and ~6% had no contact detail at all.
 
-**The email is the only field that counts.** The gateway's test is literally
-`hasBroker = !!broker.email` — a broker with a name and phone but no email is
-treated as *no broker at all*. So a broker record without an email buys nothing.
+**One contact per property.** The gateway keys contacts on `(property_id, email)`
+with NULLS NOT DISTINCT, so a property can hold only one contact that has no
+email. Send the listing broker when there is one, the owner otherwise — don't
+send both, the second is silently dropped.
 
-**This is a graceful fallback, not a failure.** Any property with no broker email
-is set to `needs_enrichment` and picked up by `lexisnexis-contact-lookup`, which
-is exactly where a hard-to-reach lead should go. So:
+**A phone-only contact still needs enrichment.** Instantly sends email, so a
+contact with a phone and no email stays `enrichment_status: pending` and stays on
+the LexisNexis work list — that is correct, not a failure to fix. A contact that
+arrived *with* an email is marked `enriched` and drops off that list.
 
-- **Don't open every brochure.** Prioritise the rows worth contacting — the
-  qualifiers and near-misses from Step 4. Rows that didn't clear the screen can go
-  to enrichment without a brochure visit.
-- Say how many brochures you're about to open and roughly how long it'll take
-  before charging ahead. At ~10–20s each this dominates the run.
-
-If the user would rather avoid brochure visits entirely, tell them: adding the
-broker columns to the **Industrial saved layout** in CoStar makes them come down
-with the export, and this step disappears.
+> **Do not open brochures to collect contacts.** This step used to say the
+> layout carried "the listing, not the broker" and sent you to the brochure for
+> each row. That was wrong: the columns above have been in the export all along,
+> and on 2026-08-05 that instruction cost 485 broker phone numbers, which were
+> read from the spreadsheet and discarded. If you think a brochure is needed,
+> re-read the header you printed in Step 3 first.
 
 ## Step 6 — Ingest (persist via gateway)
 
-Call **`adana_ingest_costar_export`** with the full listing set (priced +
-no-price), including broker contacts:
+Call **`adana_ingest_costar_export`** with the `listings` list Step 3 built —
+priced and no-price together, contacts already attached:
 
 ```
 adana_ingest_costar_export(
   gateway_api_key: "${GATEWAY_API_KEY}",
   location: "<saved search name or location>",
   listings: [ { address_raw, city, state, zip, property_type, building_sf,
-                lot_size_acres, asking_price, source_url, brochure_url,
-                external_id, broker: { first_name, last_name, email, mobile, company } }, ... ]
+                lot_size_acres, asking_price,
+                broker: { first_name, last_name, mobile, company, title, contact_type } }, ... ]
 )
 ```
 
+Notes on the `broker` object:
+- **Send whichever of `email` / `mobile` the export gave you** — the gateway
+  stores the contact on either. Omit a field entirely rather than sending `""`
+  or `null`; `clean()` already does this.
+- **`contact_type`** is `broker` or `owner`; `contact_for()` sets it. It defaults
+  to `broker` if omitted, which mislabels an owner row.
+- `source_url` / `brochure_url` / `external_id` are accepted but the layout in
+  use may carry none of them — omit them rather than inventing values.
+
 The gateway UPSERTs properties (dedup on normalized address), records a
-`property_sources` row per listing, UPSERTs broker contacts, and sets statuses
-(flow1 → `sourced`; flow3 with no broker → `needs_enrichment`). Relay the
-returned `{run_id, found, new, updated}` so the user can confirm the data landed.
+`property_sources` row per listing, UPSERTs the contact on each listing, and sets
+statuses (contactable → `sourced`; no contact → `needs_enrichment`). Relay the
+returned `{run_id, found, new, updated, contacts}`.
+
+**Check `contacts` against `with_contact` from Step 3.** If Step 3 printed
+"485 with a contact" and ingest returns `contacts: 0`, the broker objects didn't
+survive the mapping — stop and fix it rather than reporting a clean run. A silent
+zero here is precisely how 485 contacts were lost once already.
 
 ## Step 7 — Qualify & write back (the recommendation)
 
 Screening (Step 4) only tells you whether the **price** clears the buy-box. The
 recommendation — a graded conviction score, the *why*, and the strategic buy-box
-checklist — is **yours to produce**: you have the full CoStar row, the listing,
-the brochure, and the map, none of which the gateway sees. Build one
-qualification per property you ingested and write it back with
-**`adana_save_qualification`**:
+checklist — is **yours to produce**: you have the full CoStar row, the listing
+and the map, none of which the gateway sees. Build one qualification per property
+you ingested and write it back with **`adana_save_qualification`**:
 
 ```
 adana_save_qualification(
@@ -263,7 +386,7 @@ Rules:
   `threshold`, `band` as returned); set `far` to the **decimal** (`far_pct ÷ 100`,
   so 10.5% → `0.105`). FAR/PLSF/PSFB are the gateway's to compute, not yours.
 - **Don't invent the location checks.** Mark a check `pass: true` only when the
-  listing / brochure / map actually supports it; otherwise `pass: false` with a
+  CoStar row / listing / map actually supports it; otherwise `pass: false` with a
   short `note`. A thin or unverifiable criterion is a real signal — fabricating
   one is worse than leaving it false.
 - **`action` mirrors the screen by default, but you may override it on strategic
@@ -276,9 +399,9 @@ Rules:
 
 ### Scoring is not promoting — expect `held`
 
-Score **every** property you ingested, including the no-broker ones. You are the
-only reader who will ever have the CoStar row, the listing, the brochure and the
-map open at once; that judgment is captured now or lost.
+Score **every** property you ingested, including the ones with no contact. You
+are the only reader who will ever have the CoStar row, the listing and the map
+open at once; that judgment is captured now or lost.
 
 But scoring does not move a property into Gate 1. **The gateway will not promote
 a property to `qualified` while it has no usable contact** (no email and no
@@ -286,23 +409,35 @@ mobile) — it stores your overlay and leaves the status at `needs_enrichment`,
 returning that address in **`held`**. It qualifies later, once
 `lexisnexis-contact-lookup` supplies a contact.
 
-So on a run where the saved layout carried no broker columns and you opened few
-brochures, a `held` count close to your item count is the **correct** outcome,
-not a failure. Gate 1 approves outreach; a property nobody can contact does not
-belong in it. Never try to work around a hold — the `pipeline_status` override is
-gated too, and attempting one just misreports the pipeline.
+With the contact columns mapped in Step 3, most rows carry an email or a phone,
+so `held` should be **small** — roughly the rows with neither. **A `held` count
+near your item count means Step 3's contact mapping didn't work**; go back and
+check it rather than accepting the holds. (Before that mapping existed, every
+single row was held — that is the failure mode this number now catches.)
+
+Gate 1 approves outreach; a property nobody can contact does not belong in it.
+Never try to work around a hold — the `pipeline_status` override is gated too,
+and attempting one just misreports the pipeline.
 
 ## Reporting back
 
 Tight summary: qualifier count + names, near-misses, no-price count, the ingest
-counts (`new` / `updated`), and how many properties you scored (`saved`).
+counts (`new` / `updated` / **`contacts`**), and how many properties you scored
+(`saved`).
 
-**Report `saved` and `held` separately — never as one number.** `saved` is how
-many overlays were stored; `saved - held` is how many actually reached Gate 1.
-Say it plainly, e.g. "scored 181, 181 held for enrichment — 0 in Gate 1 until
-LexisNexis runs". Reporting `saved` alone implies a Gate 1 queue that does not
-exist. Mention that no-price/no-broker rows were routed to enrichment (the
-LexisNexis skill picks them up).
+**Always report three numbers that are easy to conflate:**
+
+- **`contacts`** — how many listings landed with a contact. Compare it to
+  `with_contact` from Step 3; they should match.
+- **`saved` and `held` separately, never as one number.** `saved` is overlays
+  stored; `saved - held` is how many actually reached Gate 1. Say it plainly:
+  *"scored 181, 12 held for enrichment — 169 in Gate 1."* Reporting `saved` alone
+  implies a Gate 1 queue that may not exist.
+
+Also say **how many contacts still lack an email** (Step 3 printed this as
+`with_email`). Instantly sends email, so every phone-only contact remains on the
+LexisNexis work list until one is found — and if the layout carried no email
+column at all, mention that adding one would remove most of that work.
 
 ## Edge cases
 

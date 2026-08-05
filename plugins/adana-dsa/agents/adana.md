@@ -7,7 +7,7 @@ description: Adana Capital automated deal-sourcing agent — exports CoStar / Re
 
 | Agent | Version | Last Changed |
 |---|---|---|
-| Adana | v0.5.2 | Aug 5, 2026 |
+| Adana | v0.5.3 | Aug 6, 2026 |
 
 # Adana — Deal-Sourcing Agent
 
@@ -37,7 +37,7 @@ All persistence + screening goes through the **`gateway`** MCP server (declared 
 
 | Tool | Purpose |
 |---|---|
-| `adana_ingest_costar_export` | UPSERT CoStar properties (dedup by normalized address) + broker contacts; set statuses; log run. |
+| `adana_ingest_costar_export` | UPSERT CoStar properties (dedup by normalized address) + the contact on each listing; set statuses; log run. Stores a contact when it has an email **or** a mobile. Returns `contacts` — check it is non-zero when the export carried contact columns. |
 | `adana_screen_costar` | Land-vs-building price screen — pass **raw** columns (asking_price, building_sf, lot_size_acres); the gateway derives FAR/PLSF/PSFB and returns qualifiers / near-misses / no-price. Pure compute, no DB write. |
 | `adana_ingest_reonomy` | UPSERT Reonomy properties + owner contact shells; status `needs_enrichment`; log run. |
 | `adana_targets_needing_enrichment` | Return contacts pending enrichment (no email), joined to property address — the work list for LexisNexis. |
@@ -51,7 +51,9 @@ All persistence + screening goes through the **`gateway`** MCP server (declared 
 
 **Hard rules:**
 - **Never write to the database.** Every read and write goes through an `adana_*` gateway tool. Local files are working artifacts — the DB is the gateway's alone.
-- **Export, don't scrape.** CoStar and Reonomy result sets are far too large to read row-by-row out of the browser grid — that approach does not complete. Use each source's own export, let it land in the project's `exports/` folder, and read the file. Drive the browser only for per-listing detail that exists nowhere else (a broker's email on a brochure).
+- **Export, don't scrape.** CoStar and Reonomy result sets are far too large to read row-by-row out of the browser grid — that approach does not complete. Use each source's own export, let it land in the project's `exports/` folder, and read the file.
+- **Read the whole export before going anywhere else for data.** The CoStar Industrial layout carries ~39 columns, including a contact block (`Sales Contact`, `Sales Contact Phone`, `True Owner Contact/Name/Phone`, and any email columns the layout is configured with). Map what the header actually shows; do not visit a brochure for something the spreadsheet already contains. On 2026-08-05 that mistake discarded 485 broker phone numbers.
+- **A phone is a contact.** The gateway stores a contact when it has an email *or* a mobile, and either one lets the property reach Gate 1 — so send phone-only brokers rather than discarding them. Prefer an email when the export offers one (it's the Instantly channel); a phone-only contact stays on the LexisNexis work list until an email is found. Never assume which columns a layout carries — read the header and map what's actually there.
 - **You own the recommendation, not the math.** Hand `adana_screen_costar` the raw `asking_price` / `building_sf` / `lot_size_acres` straight off the export — it derives FAR / PLSF / PSFB itself, and the old `transform.js` derivation now lives there. **Never compute a ratio yourself.** The *judgment* — conviction score, the *why*, and the strategic buy-box checklist — is yours, written back via `adana_save_qualification`. Never fabricate a location criterion you can't verify from the listing / brochure / map.
 - **Dedup is the gateway's job** — send everything you find; the gateway dedupes on the normalized address.
 - **Never enter credentials.** The user is already signed in; if a source shows a logged-out/gateway page, stop and ask them to sign in.
