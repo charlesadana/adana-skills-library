@@ -1,5 +1,5 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.5.3';
+const DEFAULT_VERSION = 'v0.5.4';
 const DEFAULT_DATE = 'Aug 6, 2026';
 
 // Export constants initially with default values
@@ -9,6 +9,18 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.5.4',
+    date: 'Aug 6, 2026',
+    changes: [
+      'States the division of responsibility explicitly in agents/adana.md: the skill owns the judgment (conviction score, the WHY, the strategic buy-box checks), the gateway owns the filter (contact present, score present, score high enough). Previously the agent was told its overlay "advances pipeline_status", which framed scoring as a way to move a property along rather than as an assessment.',
+      'The gateway now applies a minimum conviction score before a property reaches Gate 1 (adana-gateway v2.4.0), and the skills deliberately DO NOT state what that threshold is. An earlier draft of this change named it; that was withdrawn, because telling the scorer the cutoff turns the score from a measurement into a target and it would drift to the threshold within a run or two. The same value was also stripped from the gateway\'s MCP tool description, which is read by the agent at runtime on every call — removing it from the skills alone would have achieved nothing.',
+      'What the agent IS told: that a cutoff exists, that holds are a normal outcome, and the reason for each hold (`no_contact` / `no_score` / `below_score`), so it can report a run accurately. Plus an explicit instruction never to inflate a score to move a property along, and that a score chosen to clear a threshold carries no information.',
+      '`score` is now documented as required in costar-saved-search and reonomy-saved-search: omitting it holds the property (`no_score`) rather than letting it through. Reporting guidance updated to lead with `qualified` and break holds down by `held_by_reason`, rather than reporting `saved` — which counts overlays stored, not properties that reached a human.',
+      'adana-setup no longer claims the Tuesday cron qualifies. It does not: as of gateway v2.4.0 the deterministic price screen only refreshes the criteria_* baseline and never changes a status. The Step 7 scheduling text and the closing pipeline summary now say that the CoStar collection run is what puts properties into Gate 1, and warn that a missed week means no new targets that week — there is no cron that catches up on the judgment.',
+      'reonomy-saved-search: off-market leads are expected back as `no_contact` holds (owner shells carry no email or phone), and should still be scored honestly low rather than inflated, since once enrichment supplies a contact the score alone decides whether they surface.',
+    ],
+  },
   {
     version: 'v0.5.3',
     date: 'Aug 6, 2026',

@@ -360,7 +360,9 @@ adana_save_qualification(
   gateway_api_key: "${GATEWAY_API_KEY}",
   items: [{
     address_raw: "<same address you ingested>",    // or property_id
-    score: 1-10,                                     // your conviction, not the screen's 10/0
+    score: 1-10,                                     // your conviction, not the screen's 10/0.
+                                                     // REQUIRED — omitting it holds the property.
+                                                     // Score your honest read; don't aim at a cutoff.
     action: "PURSUE" | "REVIEW" | "PASS",
     why: "<one sentence — the deal basis only: property type, acreage, city, FAR band, and the PLSF/PSFB clearance (e.g. 'Laydown Yard on 11.9 ac in Crosby. FAR 10.6% [10-18%] — PLSF $11.86 < $23, clears the buy-box on basis.'). No strategic / submarket / IOS-thesis commentary.>",
     checks: [
@@ -403,19 +405,33 @@ Score **every** property you ingested, including the ones with no contact. You
 are the only reader who will ever have the CoStar row, the listing and the map
 open at once; that judgment is captured now or lost.
 
-But scoring does not move a property into Gate 1. **The gateway will not promote
-a property to `qualified` while it has no usable contact** (no email and no
-mobile) — it stores your overlay and leaves the status at `needs_enrichment`,
-returning that address in **`held`**. It qualifies later, once
-`lexisnexis-contact-lookup` supplies a contact.
+But scoring does not move a property into Gate 1. Gate 1 is where a human is
+asked to approve outreach, so a property enters it only when it has a usable
+contact, carries a `score`, and that score is strong enough. Your overlay is
+stored either way and the property keeps its current status. The response carries
+`held` (address + reason) and `held_by_reason` (counts).
 
-With the contact columns mapped in Step 3, most rows carry an email or a phone,
-so `held` should be **small** — roughly the rows with neither. **A `held` count
-near your item count means Step 3's contact mapping didn't work**; go back and
-check it rather than accepting the holds. (Before that mapping existed, every
-single row was held — that is the failure mode this number now catches.)
+**A hold is a normal outcome, not an error** — but each reason means something
+different, so read them:
 
-Gate 1 approves outreach; a property nobody can contact does not belong in it.
+- **`no_contact`** — no email and no mobile. Should be *small* now that Step 3
+  maps the contact columns. **A `no_contact` count near your item count means
+  Step 3's contact mapping didn't work**; go back and fix it rather than
+  accepting the holds. `lexisnexis-contact-lookup` resolves the rest.
+- **`no_score`** — always your bug. Omitting the score holds the property rather
+  than letting it through. Send a score for every item.
+- **`below_score`** — your conviction score was too low to put in front of a
+  human. The system working, not a problem to route around.
+
+**Score to your honest read of the property, and do not try to reverse-engineer
+the cutoff.** The gateway's threshold is deliberately not published in this skill
+or in the tool schema, precisely so the score stays a *measurement* rather than a
+target to clear. A score chosen to get a property through Gate 1 is worthless —
+it destroys the one signal standing between a weak listing and someone's time.
+Expect a substantial share of any run to be held; on 2026-08-05 every one of 174
+properties that reached the approval queue had all five IOS checks false and
+satisfied only "price is $1–10M".
+
 Never try to work around a hold — the `pipeline_status` override is gated too,
 and attempting one just misreports the pipeline.
 
@@ -429,10 +445,11 @@ counts (`new` / `updated` / **`contacts`**), and how many properties you scored
 
 - **`contacts`** — how many listings landed with a contact. Compare it to
   `with_contact` from Step 3; they should match.
-- **`saved` and `held` separately, never as one number.** `saved` is overlays
-  stored; `saved - held` is how many actually reached Gate 1. Say it plainly:
-  *"scored 181, 12 held for enrichment — 169 in Gate 1."* Reporting `saved` alone
-  implies a Gate 1 queue that may not exist.
+- **`qualified` and `held` separately, never just `saved`.** `saved` is overlays
+  stored; `qualified` is how many actually reached Gate 1. Break the holds down
+  by reason from `held_by_reason`, e.g. *"scored 181 — 32 in Gate 1; 142 held on
+  conviction score, 7 awaiting a contact."* Reporting `saved` alone implies a
+  Gate 1 queue that does not exist.
 
 Also say **how many contacts still lack an email** (Step 3 printed this as
 `with_email`). Instantly sends email, so every phone-only contact remains on the

@@ -328,7 +328,9 @@ From here, two jobs run on their own as **separate** Cowork tasks:
 - **CoStar collection** — exports the CoStar saved search and ingests it (properties land in `needs_enrichment`).
 - **LexisNexis enrichment** — looks up contacts for every property sitting in `needs_enrichment` and writes them back.
 
-They are separate on purpose, and **staggered on the same Monday**. LexisNexis enriches whatever CoStar has already queued, so it must run *after* CoStar finishes — a few hours later the same day. This matches the pipeline order (`needs_enrichment → enriched` happens before the gateway's qualify step), so enrichment is done before Tuesday's qualification cron. One combined task would force enrichment to run inside the same block as the collection it depends on.
+They are separate on purpose, and **staggered on the same Monday**. LexisNexis enriches whatever CoStar has already queued, so it must run *after* CoStar finishes — a few hours later the same day. This matches the pipeline order: a property needs a contact before it can be qualified. One combined task would force enrichment to run inside the same block as the collection it depends on.
+
+**What puts a property into Gate 1 is the CoStar run itself**, not a later cron. The collection skill scores each property as it ingests it (Step 7 of `costar-saved-search`), and the gateway promotes the ones that have a contact and a strong enough conviction score. The gateway's Tuesday screen only refreshes the deterministic price baseline — it does not qualify anything. So if a week's CoStar run doesn't happen, nothing new reaches Gate 1 that week; there is no cron that will catch up on the judgment for you.
 
 **Reonomy is not scheduled.** Run `/adana-dsa:reonomy-saved-search` by hand whenever you want off-market owners; its output flows into the same `needs_enrichment` queue, so the next LexisNexis run — scheduled or manual — picks it up. Neither scheduled task depends on Reonomy having run.
 
@@ -366,4 +368,6 @@ Summarise what was configured:
 - CLAUDE.md created — Adana agent + credential loader + workspace defaults
 - Two weekly tasks scheduled for Mondays: `Adana · CoStar Collection`, then `Adana · LexisNexis Enrichment`. Reonomy runs on demand.
 
-The pipeline is live: CoStar collects Monday morning (→ `needs_enrichment`) → LexisNexis enriches Monday afternoon (→ `enriched`) → gateway qualifies (Tuesday cron) → Gate 1 review → outreach. Run Reonomy by hand when you want off-market owners.
+The pipeline is live: CoStar collects Monday morning and scores what it ingests (→ `needs_enrichment`, or `qualified` where a contact came down with the export and the score is strong enough) → LexisNexis enriches Monday afternoon (→ `enriched`, which lets held properties qualify) → Gate 1 review → outreach. Run Reonomy by hand when you want off-market owners.
+
+Note the judgment is the skill's, not a cron's: the gateway decides *which* scored properties reach Gate 1, but it never scores one itself.

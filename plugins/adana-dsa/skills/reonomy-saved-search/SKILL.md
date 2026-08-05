@@ -152,22 +152,30 @@ off-market leads land **`REVIEW`** (pursue the owner for a number) unless the
 strategic fit is strong enough for `PURSUE`. The gateway stores it verbatim and
 surfaces it on the property card.
 
-**Expect every one of these to come back in `held`.** Reonomy ingest creates an
-owner contact *shell* with no email or phone — those arrive later from
-`lexisnexis-contact-lookup`. The gateway will not promote a property to
-`qualified` without a usable contact, so it stores your overlay and leaves the
-status at `needs_enrichment`. That is the designed path for off-market leads, not
-an error: score them now while you have the record in front of you, and they
-enter Gate 1 after enrichment.
+**Expect every one of these to come back in `held` with reason `no_contact`.**
+Reonomy ingest creates an owner contact *shell* with no email or phone — those
+arrive later from `lexisnexis-contact-lookup`. The gateway will not promote a
+property to `qualified` without a usable contact, so it stores your overlay and
+leaves the status at `needs_enrichment`. That is the designed path for off-market
+leads, not an error: score them now while you have the record in front of you,
+and they enter Gate 1 after enrichment.
+
+**Still send a real `score`.** Once enrichment supplies a contact, the score is
+what decides whether the property surfaces to a human at all — a missing one
+holds it (`no_score`) rather than letting it through. Off-market leads with no
+price are genuinely hard to call: score them honestly low rather than inflating
+to keep them moving. **The judgment is yours; the cutoff is the gateway's**, and
+you are not told where it sits — that is what keeps the score a measurement.
 
 ## Reporting back
 
 Tight summary: how many owners/properties captured, the ingest counts
-(`new` / `updated`), and how many you scored (`saved`) — reporting `held`
-alongside it, which for Reonomy will normally equal `saved`. Say that these are
-scored but not yet in Gate 1: they are queued for contact enrichment (the
-`lexisnexis-contact-lookup` skill picks them up via
-`adana_targets_needing_enrichment`) and enter Gate 1 once a contact lands.
+(`new` / `updated`), and how many you scored (`saved`) — with `held` alongside
+it, which for Reonomy will normally equal `saved` and be entirely `no_contact`.
+Say that these are scored but not yet in Gate 1: they are queued for contact
+enrichment (the `lexisnexis-contact-lookup` skill picks them up via
+`adana_targets_needing_enrichment`) and enter Gate 1 once a contact lands, if
+their conviction score is strong enough.
 
 ## Edge cases
 
