@@ -8,7 +8,7 @@ description: >-
   user names a Reonomy saved search or asks to "pull Reonomy", "run the off-market
   search", "get owners for [area]", or refresh Reonomy results. Drives the user's
   already-logged-in browser via Claude computer (computer use).
-allowed-tools: Claude computer (computer use — screenshot, mouse, keyboard), mcp__gateway__adana_ingest_reonomy, mcp__gateway__adana_save_qualification
+allowed-tools: mcp__gateway__adana_ingest_reonomy mcp__gateway__adana_save_qualification
 area: Collection
 use_for: "Run a Reonomy saved search, export it, persist deduped off-market properties + owner contact shells (flow2), and write back a judgment-led qualification."
 deps:

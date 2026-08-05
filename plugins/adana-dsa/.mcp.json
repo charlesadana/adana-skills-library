@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "gateway": {
-      "type": "url",
+      "type": "http",
       "url": "https://gateway.adanacap.com/api/mcp"
     }
   }

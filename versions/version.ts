@@ -1,6 +1,6 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.5.0';
-const DEFAULT_DATE = 'Jul 18, 2026';
+const DEFAULT_VERSION = 'v0.5.1';
+const DEFAULT_DATE = 'Aug 5, 2026';
 
 // Export constants initially with default values
 export const APP_VERSION = DEFAULT_VERSION;
@@ -9,6 +9,16 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.5.1',
+    date: 'Aug 5, 2026',
+    changes: [
+      'Plugin schema compatibility audit: plugin.json `agents` field changed from a bare directory string to the required array-of-paths form ("./agents/adana.md") — `claude plugin validate .` was rejecting the string form.',
+      'plugin.json userConfig.gateway_api_key now declares the required `type` ("string") and `title` fields, and adds `required: true` since the plugin cannot authenticate against the gateway without it.',
+      '.mcp.json gateway server: transport `type` changed from the non-standard "url" to "http" to match the current MCP transport schema.',
+      'costar-saved-search, reonomy-saved-search, lexisnexis-contact-lookup: `allowed-tools` frontmatter trimmed to only the real mcp__gateway__* tool names — the prose "Claude computer (computer use — screenshot, mouse, keyboard)" entry was not a resolvable tool identifier there. Computer-use remains fully documented in each skill\'s body, prerequisites, deps.mcp, and agents/adana.md; allowed-tools only pre-approves tools for a turn and does not gate capability, so this is not a functional change.',
+    ],
+  },
   {
     version: 'v0.5.0',
     date: 'Jul 18, 2026',

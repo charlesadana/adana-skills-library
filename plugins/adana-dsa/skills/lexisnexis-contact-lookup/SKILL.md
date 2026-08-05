@@ -10,7 +10,7 @@ description: >-
   "enrich contacts", "find owner emails/phones", "run LexisNexis / Nexis /
   SmartLinx / Accurint", or "skip trace" a list. Drives the user's
   already-logged-in browser via Claude computer (computer use).
-allowed-tools: Claude computer (computer use — screenshot, mouse, keyboard), mcp__gateway__adana_targets_needing_enrichment, mcp__gateway__adana_save_contact_lookups
+allowed-tools: mcp__gateway__adana_targets_needing_enrichment mcp__gateway__adana_save_contact_lookups
 area: Enrichment
 use_for: "Pull pending contacts from the gateway (or a spreadsheet), look up phones/emails via LexisNexis SmartLinx, write the results back, and produce a CSV."
 deps:

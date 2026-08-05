@@ -12,7 +12,7 @@ description: >-
   casually like "run Montana through CoStar" or "pull the NEW PRODUCT search and
   tell me what fits". If the user mentions a CoStar saved search by name, this
   skill almost certainly applies.
-allowed-tools: Claude computer (computer use — screenshot, mouse, keyboard), mcp__gateway__adana_screen_costar, mcp__gateway__adana_ingest_costar_export, mcp__gateway__adana_save_qualification
+allowed-tools: mcp__gateway__adana_screen_costar mcp__gateway__adana_ingest_costar_export mcp__gateway__adana_save_qualification
 area: Collection
 use_for: "Run a CoStar saved search, export it (Industrial saved layout), screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + broker contacts, and write back the qualification (score + why + buy-box checklist)."
 deps:
