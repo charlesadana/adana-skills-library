@@ -1,120 +1,139 @@
 ---
 name: reonomy-saved-search
 description: >-
-  Run a Reonomy saved search for Adana off-market deal sourcing: open it in the
-  logged-in browser session on the computer Claude controls, export the results,
-  capture each property's owner / company and full address, and persist them
-  through the Adana gateway as off-market leads (flow2). Use this whenever the
-  user names a Reonomy saved search or asks to "pull Reonomy", "run the off-market
-  search", "get owners for [area]", or refresh Reonomy results. Drives the user's
-  already-logged-in browser via Claude computer (computer use).
+  Process a Reonomy saved-search export for Adana off-market deal sourcing: read
+  the CSV the user exported into the project folder, map each property's owner and
+  address, persist them through the Adana gateway as off-market leads (flow2), and
+  write back a judgment-led qualification. The user runs the Reonomy export
+  themselves; this skill takes over from the file. Use this whenever the user names
+  a Reonomy saved search or asks to "pull Reonomy", "run the off-market search",
+  "get owners for [area]", or says they've dropped a Reonomy export in.
 allowed-tools: mcp__gateway__adana_ingest_reonomy mcp__gateway__adana_save_qualification
 area: Collection
-use_for: "Run a Reonomy saved search, export it, persist deduped off-market properties + owner contact shells (flow2), and write back a judgment-led qualification."
+use_for: "Process a Reonomy export the user has placed in the project folder: persist deduped off-market properties + owner contact shells (flow2), and write back a judgment-led qualification."
 deps:
-  mcp: ["Claude computer (computer use)"]
+  mcp: []
   gateway: ["adana_ingest_reonomy", "adana_save_qualification"]
-  files: ["exports/*.csv (read)"]
+  files: ["exports/*.csv (read)", "exports/.processed.json (read+write)"]
   env: ["gateway_api_key", "ADANA_EXPORT_DIR"]
 ---
 
-# Reonomy saved-search → export → ingest
+# Reonomy export → ingest → qualify
 
-Collects **off-market** opportunities (flow2) from Reonomy and persists them
-through the **gateway** MCP. The saved-search name (or location/filter set) is
-the single parameter.
+Collects **off-market** opportunities (flow2). **The user exports from Reonomy;
+this skill starts at the CSV** in `exports/`. No browser, no login.
 
-**Export the result set; never read the results list row-by-row.** A real search
-returns far more rows than the browser tools can walk, and that approach does not
-complete. The export file is a working artifact — the gateway is the record.
-
-> ⚠️ **The export UI steps below are unverified.** Unlike the CoStar skill, there
-> is no battle-tested reference for Reonomy's export flow — the button labels and
-> dialog in Step 2 are a best guess at Reonomy's UI. On the first run, **read the
-> page and adapt** rather than trusting these labels, and report back what the
-> real flow was so this skill can be corrected. Do not fall back to scraping.
+Everything is persisted through the **gateway** MCP. The export file is a working
+artifact; the gateway is the record.
 
 Read `agents/adana.md` first for the gateway connection rules and the
 `${GATEWAY_API_KEY}` convention.
 
 ## Prerequisites
 
-- The user is logged into Reonomy in the browser running on the computer Claude controls.
-- `GATEWAY_API_KEY` is loaded — run `load_credentials()` from CLAUDE.md's **Credential Loading** section before the first `adana_*` call. Scheduled runs do not inject it automatically.
-- The browser's download location points at the project's `exports/` folder (set by `/adana-dsa:adana-setup` Step 5). Without this the export lands somewhere the skill cannot read.
+- A **Reonomy CSV export** in the project's `exports/` folder
+  (`$ADANA_EXPORT_DIR`, default `exports/`), including the owner columns.
+- `GATEWAY_API_KEY` is loaded — run `load_credentials()` from CLAUDE.md's
+  **Credential Loading** section before the first `adana_*` call.
 
-Confirm the saved-search name (or the search to run) before driving the browser.
+## Step 1 — Get the export
 
-## Step 1 — Open the saved search
+If the user has already exported and said so, go to "Find what's new". Otherwise:
 
-Use Claude computer (computer use). Navigate to Reonomy (`https://app.reonomy.com`),
-open the user's **Saved Searches**, and run the one they named. Wait for the
-results list to settle. Work from a fresh screenshot to locate controls visually
-before clicking, rather than reusing fixed coordinates.
+> In Reonomy (`app.reonomy.com`): open **Saved Searches**, run the one you want,
+> and use the results toolbar's **Export / Download** control. Choose **CSV**, and
+> if it offers a column or field selection, **include the owner columns** — the
+> owner is the entire point of this flow. Put the file in this project's
+> **`exports/`** folder and tell me which saved search it was.
 
-Edge case — **no saved search by that name**: list the saved searches that exist
-and ask which they meant.
+**Ask which saved search it was.** You need the name for the `location` argument,
+and the file doesn't record it.
 
-## Step 2 — Export the results
+### Find what's new
 
-**Export; do not page through the list.** Reonomy offers a CSV/Excel export of a
-result set — find it and use it.
-
-Typical path (⚠️ **unverified — read the page and adapt**): with the results
-open, look for an **Export** / **Download** control in the results toolbar or
-under a "⋯" / "More" menu. Choose **CSV**, include the owner columns if the
-dialog offers a column/field selection, and confirm.
-
-Locate the control visually from a fresh screenshot, **by its label**, not by
-fixed coordinates. If you cannot find an export control at all, **stop and tell
-the user** — do not silently fall back to reading the list row-by-row, which will not
-finish. Report what you actually saw so this step can be corrected.
-
-The file lands in `$ADANA_EXPORT_DIR` (default `exports/`) — the single folder
-the browser's download location points at, shared with CoStar. Read it from there.
-
-## Step 3 — Read the export into rows
-
-Read the newest export and build one row per property. Column names are Reonomy's
-and are **not yet confirmed** — inspect the header first and map what's actually
-there.
+Exports accumulate in `exports/`, and this skill may run some time after the file
+was dropped, so the question is **"have I already processed it?"** — not "is this
+recent?". The marker is shared with the CoStar skill; they don't collide because
+Reonomy exports are `.csv` and CoStar's are `.xlsx`.
 
 ```python
-import csv, glob, os
+import csv, glob, json, os, datetime
 
 export_dir = os.environ.get("ADANA_EXPORT_DIR", "exports")
-files = glob.glob(os.path.join(export_dir, "*.csv"))
-if not files:
-    raise SystemExit(f"No CSV in {export_dir}/ — did the export land?")
-newest = max(files, key=os.path.getmtime)
+marker = os.path.join(export_dir, ".processed.json")
 
-with open(newest, newline="", encoding="utf-8-sig") as f:
-    rows = list(csv.DictReader(f))
+seen = {}
+if os.path.exists(marker):
+    with open(marker, encoding="utf-8") as f:
+        seen = json.load(f)          # {filename: mtime_when_processed}
 
-print(rows[0].keys() if rows else "empty export")   # inspect the real headers first
+files = sorted(glob.glob(os.path.join(export_dir, "*.csv")), key=os.path.getmtime)
+todo = [f for f in files
+        if seen.get(os.path.basename(f)) != os.path.getmtime(f)]
+
+for f in files:
+    mark = "NEW" if f in todo else "done"
+    age_h = (datetime.datetime.now().timestamp() - os.path.getmtime(f)) / 3600
+    print(f"  [{mark:4}] {os.path.basename(f)} — {age_h:.1f}h old")
+print(f"{len(todo)} export(s) to process, {len(files) - len(todo)} already done")
 ```
 
-Map onto the gateway's schema — per property:
+**If `todo` is empty, say so and stop.** Never reprocess a marked file to have
+something to report — re-ingesting an old export re-dates properties that were
+never re-listed.
+
+**`*.csv` is a loose match.** Any stray CSV in `exports/` will appear here, so
+confirm the header actually looks like a Reonomy property export before ingesting
+anything — an address-like column plus an owner-like column at minimum. If it
+doesn't, skip the file and say which one you skipped rather than guessing at a
+mapping.
+
+Record a file as processed **only after a successful ingest** (Step 3), never
+before:
+
+```python
+seen[os.path.basename(path)] = os.path.getmtime(path)
+with open(marker, "w", encoding="utf-8") as f:
+    json.dump(seen, f, indent=2)
+```
+
+## Step 2 — Read the export into rows
+
+Reonomy's column names are **not fixed** and vary with the export configuration.
+**Inspect the real header first and map what's actually there** — do not assume
+the names below.
+
+```python
+with open(path, newline="", encoding="utf-8-sig") as f:   # `path` = a file from Step 1
+    rows = list(csv.DictReader(f))
+
+if not rows:
+    raise SystemExit("Empty export — the saved search returned nothing.")
+print(list(rows[0].keys()))          # the real headers, before mapping anything
+```
+
+Map onto the gateway's schema, per property:
 
 - `address_raw`, `city`, `state`, `zip`
-- `property_type`, and `building_sf` / `lot_size_acres` if present
-- `external_id` (Reonomy property id) and `listing_url` if present
-- **owner**: `first_name`, `last_name`, `company` (Reonomy surfaces the owning
-  entity / reported owner; email + phone are usually absent — they come later via
-  LexisNexis enrichment). The gateway's `owner` object *does* accept `email` and
-  `mobile`, so pass them if the export happens to carry them.
+- `property_type`, and `building_sf` / `lot_size_acres` where present
+- `external_id` (Reonomy property id) and `listing_url` where present
+- **owner**: `first_name`, `last_name`, `company`. Reonomy surfaces the owning
+  entity or reported owner; email and phone are usually absent and arrive later
+  from enrichment. The `owner` object does accept `email` and `mobile` — pass them
+  if the export happens to carry them, since either one makes the contact reachable.
 
-**The Reonomy schema has no `asking_price`, `source_url` or `brochure_url`** — if
-the export carries a price, there is nowhere to put it. Don't invent a field.
+**Reonomy has no `asking_price`, `source_url` or `brochure_url` in this schema.**
+If the export carries a price there is nowhere to put it — don't invent a field.
 
-## Step 4 — Ingest (persist via gateway)
+Omit empty values rather than sending `null`: `ingest` accepts a missing key but
+rejects an explicit null.
 
-Call **`adana_ingest_reonomy`**:
+## Step 3 — Ingest (persist via gateway)
 
 ```
 adana_ingest_reonomy(
   gateway_api_key: "${GATEWAY_API_KEY}",
-  location: "<saved search name or location>",
+  location: "<saved search name>",
   properties: [ { address_raw, city, state, zip, property_type, building_sf,
                   lot_size_acres, external_id, listing_url,
                   owner: { first_name, last_name, company } }, ... ]
@@ -122,23 +141,26 @@ adana_ingest_reonomy(
 ```
 
 The gateway UPSERTs properties (dedup on normalized address), records a
-`property_sources` row, creates an **owner contact shell**, and sets new
-properties to **`needs_enrichment`** (owner email/phone are filled in later by
-the LexisNexis skill). Relay the returned `{run_id, found, new, updated}`.
+`property_sources` row, creates an **owner contact shell**, and sets new properties
+to **`needs_enrichment`** — owner email and phone are filled in later. Relay
+`{run_id, found, new, updated}`.
 
-## Step 5 — Qualify & write back (the recommendation)
+**Mark the file processed now**, using the snippet from Step 1, and only if the
+ingest succeeded. If more files remain in `todo`, return to Step 2 with the next
+one — each with its own `location`.
 
-Off-market Reonomy leads usually have **no list price**, so the FAR/PLSF/PSFB
-price screen can't run — the call here is **judgment**: does the site fit the
-Adana IOS buy-box on type, size, and location? Write your read back with
-**`adana_save_qualification`** (omit the `screen` block when there's no price):
+## Step 4 — Qualify and write back
+
+Off-market leads usually have **no list price**, so the FAR/PLSF/PSFB screen can't
+run. The call is **judgment**: does the site fit the Adana IOS buy-box on type,
+size and location?
 
 ```
 adana_save_qualification(
   gateway_api_key: "${GATEWAY_API_KEY}",
   items: [{
     address_raw: "<same address you ingested>",     // or property_id
-    score: 1-10,
+    score: 1-10,                                    // REQUIRED
     action: "PURSUE" | "REVIEW" | "PASS",
     why: "<one short paragraph — owner/asset/location fit, and that pricing is TBD>",
     checks: [ { "label": "Significant outdoor storage (stabilized yard)", "pass": true, "note": "<acres>" }, ... ]
@@ -146,41 +168,50 @@ adana_save_qualification(
 )
 ```
 
-Same honesty rule as CoStar: assert a location check only when the Reonomy record
-or the map supports it — don't fabricate one. Pricing is unknown, so most
-off-market leads land **`REVIEW`** (pursue the owner for a number) unless the
-strategic fit is strong enough for `PURSUE`. The gateway stores it verbatim and
-surfaces it on the property card.
+Omit the `screen` block when there's no price.
 
-**Expect every one of these to come back in `held` with reason `no_contact`.**
-Reonomy ingest creates an owner contact *shell* with no email or phone — those
-arrive later from `lexisnexis-contact-lookup`. The gateway will not promote a
-property to `qualified` without a usable contact, so it stores your overlay and
-leaves the status at `needs_enrichment`. That is the designed path for off-market
-leads, not an error: score them now while you have the record in front of you,
-and they enter Gate 1 after enrichment.
+Same honesty rule as CoStar: assert a location check only where the Reonomy record
+or the map supports it. Pricing is unknown, so most off-market leads land `REVIEW`
+— pursue the owner for a number — unless the strategic fit is strong enough for
+`PURSUE`.
+
+**Expect every one of these back in `held` with reason `no_contact`.** The owner
+shell has no email or phone, and the gateway will not promote a property to
+`qualified` without a usable contact, so it stores your overlay and leaves the
+status at `needs_enrichment`. That is the designed path for off-market leads, not
+an error: score them now, while the record is in front of you, and they enter
+Gate 1 after enrichment.
 
 **Still send a real `score`.** Once enrichment supplies a contact, the score is
-what decides whether the property surfaces to a human at all — a missing one
-holds it (`no_score`) rather than letting it through. Off-market leads with no
-price are genuinely hard to call: score them honestly low rather than inflating
-to keep them moving. **The judgment is yours; the cutoff is the gateway's**, and
-you are not told where it sits — that is what keeps the score a measurement.
+what decides whether the property surfaces to a human at all — a missing one holds
+it (`no_score`). Off-market leads with no price are genuinely hard to call: score
+them honestly low rather than inflating to keep them moving. **The judgment is
+yours; the cutoff is the gateway's**, and you are not told where it sits — that is
+what keeps the score a measurement rather than a target.
 
 ## Reporting back
 
-Tight summary: how many owners/properties captured, the ingest counts
-(`new` / `updated`), and how many you scored (`saved`) — with `held` alongside
-it, which for Reonomy will normally equal `saved` and be entirely `no_contact`.
-Say that these are scored but not yet in Gate 1: they are queued for contact
-enrichment (the `lexisnexis-contact-lookup` skill picks them up via
-`adana_targets_needing_enrichment`) and enter Gate 1 once a contact lands, if
-their conviction score is strong enough.
+How many properties captured, the ingest counts (`new` / `updated`), and how many
+you scored (`saved`) — with `held` alongside, which for Reonomy will normally equal
+`saved` and be entirely `no_contact`.
+
+Say plainly that these are scored but **not yet in Gate 1**: they are queued for
+contact enrichment (`apollo-email-lookup` first, then `lexisnexis-contact-lookup`)
+and enter Gate 1 once a contact lands, if the conviction score clears the cutoff.
 
 ## Edge cases
 
-- **Empty result set**: re-check the right search was opened.
-- **Gateway key rejected**: stop and ask the user to set a valid `adana_live_…`
-  key in the plugin config.
-- **Logged out**: if Reonomy shows a sign-in page, stop and ask the user to sign
-  in — never enter credentials.
+- **Nothing new to process**: normal if the user hasn't exported since the last
+  run. Say so and stop.
+- **No CSV in `exports/`**: nothing has been placed there, or downloads are landing
+  in their normal Downloads folder. Give them the Step 1 recipe.
+- **A CSV that isn't a Reonomy export**: skip it and name it. Don't guess a mapping
+  onto an unfamiliar header.
+- **Empty export**: the saved search returned nothing. Ask them to confirm they ran
+  the search they meant.
+- **No owner columns**: the export was configured without them. The properties are
+  still worth ingesting, but say that every one will land as `needs_enrichment`
+  with no contact at all — and that re-exporting with owner columns included is
+  worth more than any enrichment run.
+- **Gateway key rejected**: stop and ask the user to re-run
+  `/adana-dsa:adana-setup` with a valid `adana_live_…` key.

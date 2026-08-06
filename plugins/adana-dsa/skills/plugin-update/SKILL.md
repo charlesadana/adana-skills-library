@@ -96,32 +96,46 @@ Read `.claude/settings.local.json` (**search up from cwd** — same lookup the `
 | `GATEWAY_API_KEY` | v0.1.0 | present / missing |
 | `ADANA_EXPORT_DIR` | v0.3.0 | present / missing |
 | `LEXISNEXIS_DIR` | v0.3.0 | present / missing |
+| `APOLLO_DIR` | v0.6.0 | present / missing |
 
 If `GATEWAY_API_KEY` is present, do a quick sanity check: verify it starts with `adana_live_` (prefix only — don't call the gateway yet).
 
 ### 1a-2. Working folders + browser download location (v0.3.0)
 
-v0.3.0 replaced grid-scraping with **exports** — the old approach never completed on a real saved search. That makes the export folder load-bearing.
+Everything now moves between the user and the skills as files in these folders, which makes them load-bearing.
 
 | Item | Required since | Status |
 |---|---|---|
 | `exports/` exists | v0.3.0 | present / missing |
 | `lexisnexis/` exists | v0.3.0 | present / missing |
+| `apollo/` exists | v0.6.0 | present / missing |
 | the browser's download location points at `exports/` | v0.3.0 | **ask the user — cannot be probed** |
+
+`lexisnexis/` is now a two-way workspace (worklist out, results back) rather than a
+scratch folder, and `apollo/` is a run log — neither is a download target.
 
 The browser setting lives on the user's machine, not in the sandbox — there is no way to read it from here. Ask:
 
-> Is the browser's download location (its Settings → Downloads → Location) set to this project's `exports/` folder, with "Ask where to save each file" turned **off**?
+> Is your browser's download location (Settings → Downloads → Location) set to this project's `exports/` folder, with "Ask where to save each file" turned **off**?
 
-**This is the gap most likely to be silently wrong**, and it fails on a Monday morning with nobody watching: CoStar exports fine, the file lands in the user's normal Downloads folder, and the skill sees an empty directory.
+As of v0.6.0 this is a **convenience** for CoStar rather than a requirement: the user exports by hand, so if downloads go elsewhere they can simply move the file into `exports/`. It is still **required for `reonomy-saved-search`**, where Claude drives the download unattended and cannot dismiss a native save dialog.
 
-### 1b. Gateway connector
+Either way, establish which it is. The failure looks the same from inside the sandbox — the export "worked" and the folder is empty — and it surfaces on a Monday with nobody watching.
+
+### 1b. Connectors
 
 Probe the gateway by attempting a low-cost call (`adana_log_run` with a dry-run flag). If the tool is unavailable or returns an auth error, the connector is not registered.
 
-| Item | Status |
-|---|---|
-| `gateway` connector registered | present / missing |
+For Apollo, just check whether the `mcp__apollo__*` tools are present in this session — do **not** spend a credit probing it.
+
+| Item | Required since | Status |
+|---|---|---|
+| `gateway` connector registered | v0.1.0 | present / missing |
+| `apollo` connector registered | v0.6.0 | present / missing / **not applicable** |
+
+**Apollo is optional.** If the user has no Apollo subscription, record it as ⏭ not ❌ and move on — the pipeline still runs, with `lexisnexis-contact-lookup` doing all enrichment by hand. Only flag it as a gap if they say they do have Apollo.
+
+If the tools are missing but the user insists the connector is connected, the likely cause is the tool-name prefix: `apollo-email-lookup` assumes `mcp__apollo__*`, and a connector registered under a longer label produces something else. Check the real names before concluding it isn't set up.
 
 ### 1c. CLAUDE.md
 
@@ -150,9 +164,14 @@ For each skill in `skills-manifest.json`, check whether its `deps.env`, `deps.mc
 
 | Skill | Needs | Checked in |
 |---|---|---|
-| `costar-saved-search` | `GATEWAY_API_KEY`, `ADANA_EXPORT_DIR`, browser download location, Claude computer (computer use) | 1a, 1a-2, 1b |
-| `reonomy-saved-search` | `GATEWAY_API_KEY`, `ADANA_EXPORT_DIR`, browser download location, Claude computer (computer use) | 1a, 1a-2, 1b |
-| `lexisnexis-contact-lookup` | `GATEWAY_API_KEY`, `LEXISNEXIS_DIR`, Claude computer (computer use) | 1a, 1a-2, 1b |
+| `costar-saved-search` | `GATEWAY_API_KEY`, `ADANA_EXPORT_DIR` | 1a, 1a-2 |
+| `reonomy-saved-search` | `GATEWAY_API_KEY`, `ADANA_EXPORT_DIR` | 1a, 1a-2 |
+| `lexisnexis-contact-lookup` | `GATEWAY_API_KEY`, `LEXISNEXIS_DIR` | 1a, 1a-2 |
+| `apollo-email-lookup` *(new in v0.6.0)* | `GATEWAY_API_KEY`, `APOLLO_DIR`, `apollo` connector | 1a, 1a-2, 1b |
+
+**No skill requires Claude computer (computer use) any more** (v0.6.0). Every skill up to v0.5.x that drove the user's browser now works from a file instead: CoStar and Reonomy from exports the user places in `exports/`, LexisNexis from a work-list spreadsheet they fill in. Apollo was API-only from the start.
+
+Nothing needs uninstalling — computer use simply stops being used. But **tell the user**, because the change is in their habits rather than in the config: they now export from CoStar and Reonomy themselves, and run the LexisNexis lookups themselves. Nothing will error to signal it; the first sign would otherwise be a scheduled run reporting "nothing new to process" week after week.
 
 As new skills are added with different deps, add rows here.
 
@@ -160,17 +179,22 @@ As new skills are added with different deps, add rows here.
 
 Scheduled tasks cannot be probed — they live in Cowork's scheduler only. Ask the user what they see under Cowork → Scheduled.
 
-As of **v0.4.0** there are **two** separate weekly tasks. The single combined `Adana · Weekly Collection` was split: CoStar and LexisNexis now run as their own staggered Monday jobs, and Reonomy is no longer scheduled.
+As of **v0.6.0** the two scheduled tasks are **CoStar Collection** and **Apollo Email Lookup**. The rule is now explicit: *only jobs that can run with nobody watching get a schedule.*
 
-> In Cowork → Scheduled, do you see **"Adana · CoStar Collection"** and **"Adana · LexisNexis Enrichment"**? And is the old combined **"Adana · Weekly Collection"** still listed?
+**`Adana · LexisNexis Enrichment` is retired as a scheduled task** (it was introduced in v0.4.0). It drives a logged-in browser and needs a human present — to keep the session alive and to judge ambiguous matches. Left on a schedule it stalls on a sign-in prompt, or saves a confident wrong match with nobody watching. It becomes an on-demand skill, and Apollo takes its slot for the part that genuinely automates.
+
+> In Cowork → Scheduled, do you see **"Adana · CoStar Collection"** and **"Adana · Apollo Email Lookup"**? And are either of the older **"Adana · LexisNexis Enrichment"** or **"Adana · Weekly Collection"** still listed?
 
 | Item | Required since | Status |
 |---|---|---|
 | `Adana · CoStar Collection` scheduled | v0.4.0 | present / missing |
-| `Adana · LexisNexis Enrichment` scheduled | v0.4.0 | present / missing |
+| `Adana · Apollo Email Lookup` scheduled | v0.6.0 | present / missing / ⏭ no Apollo |
+| `Adana · LexisNexis Enrichment` **removed** | v0.6.0 | removed / **still present** |
 | Legacy `Adana · Weekly Collection` removed | v0.4.0 | removed / **still present** |
 
-A workspace set up before v0.4.0 has the single combined task and neither of the two new ones — that's the migration Step 3d handles. The old task must be **deleted**, not left alongside the new ones: it keeps Reonomy on a schedule and re-runs the whole pipeline in one Monday block, double-collecting.
+Two migrations can be outstanding at once. A workspace last set up at **v0.2.x** has the single combined task and none of the current ones. A workspace at **v0.4.0–v0.5.x** has CoStar plus the LexisNexis task that now needs deleting. Step 3d handles both.
+
+Leaving the LexisNexis task scheduled is not harmless: it runs unattended every Monday, blocks on the browser, and writes a `reply_sync`-style failed run — or worse, records a wrong-person match nobody reviewed.
 
 ---
 
@@ -180,39 +204,49 @@ Show a compact summary before doing anything. Example format:
 
 ```
 [adana-dsa] Plugin Update — Gap Report
-Plugin version: v0.2.2 → v0.4.0
+Plugin version: v0.5.2 → v0.6.0
 
 Env vars
-  ✅ GATEWAY_API_KEY
-  ❌ ADANA_EXPORT_DIR / LEXISNEXIS_DIR   (new in v0.3.0)
+  ✅ GATEWAY_API_KEY · ADANA_EXPORT_DIR · LEXISNEXIS_DIR
+  ❌ APOLLO_DIR                          (new in v0.6.0)
 
-Connector
+Connectors
   ✅ gateway registered
+  ❌ apollo not connected                (new in v0.6.0 — optional)
 
 Working folders
-  ❌ exports/ · lexisnexis/ — not created
+  ✅ exports/ · lexisnexis/
+  ❌ apollo/ — not created
   ❓ browser download location — needs your confirmation
 
 CLAUDE.md
-  ⚠️  Version stamp stale (v0.2.2 embedded, v0.4.0 installed)
-  ❌ Workspace Defaults / Workspace Structure missing (new in v0.3.0)
+  ⚠️  Version stamp stale (v0.5.2 embedded, v0.6.0 installed)
+  ⚠️  Workspace Defaults missing apollo/  (new in v0.6.0)
 
 Scheduled tasks
-  ❌ Adana · CoStar Collection · Adana · LexisNexis Enrichment   (split in v0.4.0)
-  ⚠️  legacy "Adana · Weekly Collection" still scheduled — delete it (Step 3d)
+  ✅ Adana · CoStar Collection
+  ❌ Adana · Apollo Email Lookup          (new in v0.6.0)
+  ⚠️  "Adana · LexisNexis Enrichment" still scheduled — retired, delete it (Step 3d)
 
-Skills changed since v0.2.2
-  ⚠️  costar-saved-search, reonomy-saved-search — now EXPORT instead of scraping
-      the results grid (the old approach never completed on a real search).
-      Requires the export folder + browser download location above. (v0.3.0)
-  ⚠️  lexisnexis-contact-lookup — now resumable via lexisnexis/results.json,
-      and orders phones by listing name so a relative's number can't become the
-      primary contact. (v0.3.0)
-  ⚠️  scheduling split into two staggered Monday tasks; Reonomy is now manual.
-      Delete the old combined task and create the two above. (v0.4.0)
+Skills changed since v0.5.2
+  🆕 apollo-email-lookup — finds work emails through Apollo's API. No browser,
+      no login, ~2c per contact, so it can run unattended. Run it BEFORE
+      LexisNexis; the manual pass then only handles what Apollo can't. (v0.6.0)
+  ⚠️  NO skill drives your browser any more. (v0.6.0)
+      costar-saved-search / reonomy-saved-search — YOU export into exports/,
+        the skill picks up anything it hasn't processed yet.
+      lexisnexis-contact-lookup — it writes you a worklist CSV, you run the
+        lookups, it reads your results back.
+  ⚠️  LexisNexis is no longer scheduled — the lookups are your own work.
+      It stays available on demand. (v0.6.0)
 
-→ 5 required gaps · 1 legacy task to remove · 1 stale item · ready to fix?
+→ 2 required gaps · 1 optional connector · 1 retired task to remove · ready to fix?
 ```
+
+**Say the workflow change out loud in the report.** The two skills above still have
+the same names and still do the same job, so nothing errors — the user simply finds
+that Monday now needs an export from them. Discovering that when a scheduled run
+reports "no export found" is a bad way to learn it.
 
 Ask:
 > Want me to fill these gaps now? I'll skip anything you say "skip" to.
@@ -229,9 +263,10 @@ Walk through each ❌ or ⏭ item. Skip anything already ✅. Accept "skip" at a
 
 Delegate to `/adana-dsa:adana-setup` Step 2. Ask the user to paste the key; write it to `.claude/settings.local.json`.
 
-### 3b. Gateway connector not registered
+### 3b. Connector not registered
 
-Delegate to `/adana-dsa:adana-setup` Step 3. Walk the user through Settings → Connectors → Add custom connector.
+- **Gateway** — delegate to `/adana-dsa:adana-setup` Step 3: Settings → Connectors → Add custom connector.
+- **Apollo** (v0.6.0) — delegate to `/adana-dsa:adana-setup` Step 3b. It is a ready-made connector, not a custom URL, and authorises via OAuth with no key to paste. Skip without complaint if the user has no Apollo subscription.
 
 ### 3b-2. Working folders / browser download location missing (v0.3.0)
 
@@ -302,22 +337,24 @@ Show the user a unified diff before writing. Never overwrite content outside the
 
 **Verify after re-embed:** confirm the stamp matches `adana.md`'s current Maintenance version, and that a string unique to that version appears in the embedded body. If it doesn't, the body didn't get replaced — re-read the full text and retry.
 
-### 3d. Scheduled tasks missing or not yet split (v0.4.0)
+### 3d. Scheduled tasks — migrate, then fill (v0.6.0)
 
-The two weekly tasks are created by `/adana-dsa:adana-setup` Step 7. Fill whichever is missing, and migrate any workspace still on the old combined task.
+The two current tasks are created by `/adana-dsa:adana-setup` Step 7. **Delete the retired tasks first**, so the workspace is never running old and new side by side. `/schedule` cannot delete, so both removals are manual steps for the user.
 
-**First, if the legacy `Adana · Weekly Collection` task still exists (pre-v0.4.0 workspace):** it must be deleted before creating the replacements — otherwise it keeps running Reonomy on a schedule and re-collecting the whole pipeline in one Monday block. `/schedule` cannot delete tasks, so this is a manual step for the user:
+**First, any retired task still present:**
 
-> You still have the old **"Adana · Weekly Collection"** task. Open Cowork → Scheduled, delete it, then tell me — I'll set up the two replacement tasks.
+> Open Cowork → Scheduled and delete these if you see them, then tell me:
+> - **"Adana · LexisNexis Enrichment"** — no longer scheduled. It needs someone at the browser, so an unattended run either stalls on a sign-in prompt or saves a match nobody checked. Run it by hand instead, on whatever Apollo couldn't resolve.
+> - **"Adana · Weekly Collection"** — the pre-v0.4.0 combined task. It re-runs the whole pipeline in one block and keeps Reonomy on a schedule.
 
-Wait for the user to confirm the deletion before creating the new tasks, so the workspace never ends up with all three scheduled at once.
+Wait for confirmation before creating anything, so the workspace never ends up with three or four tasks at once.
 
-**Then create the two tasks**, exactly as `adana-setup` Step 7 does — invoke `/schedule` once per task. Create only the one(s) missing; skip any the user already has:
+**Then create the two current tasks**, exactly as `adana-setup` Step 7 does — `/schedule` once per task. Create only what's missing:
 
 - `Adana · CoStar Collection` — **Weekly, Monday**, first time (default 9 AM) → runs `/adana-dsa:costar-saved-search`.
-- `Adana · LexisNexis Enrichment` — **Weekly, Monday**, a later time (default 2 PM, staggered after CoStar) → runs `/adana-dsa:lexisnexis-contact-lookup`.
+- `Adana · Apollo Email Lookup` — **Weekly, Monday**, a later time (default 11 AM, after CoStar) → runs `/adana-dsa:apollo-email-lookup`. **Skip if the user has no Apollo subscription**, and tell them enrichment is then entirely manual.
 
-**Reonomy is not scheduled** — it runs on demand via `/adana-dsa:reonomy-saved-search`, and its output is picked up by the next LexisNexis run. Do not recreate a Reonomy task.
+**Neither Reonomy nor LexisNexis is scheduled** — both need a person at the browser. `/adana-dsa:reonomy-saved-search` and `/adana-dsa:lexisnexis-contact-lookup` run on demand. Do not recreate a task for either.
 
 ### 3e. New skill requirements (future)
 
@@ -332,9 +369,10 @@ Test only the items touched in Step 3.
 - **GATEWAY_API_KEY** — call `adana_log_run` with a dry-run test entry. If it returns 200, key is valid.
 - **Gateway connector** — probe `adana_log_run` again and confirm the connector responds.
 - **CLAUDE.md** — read it back and confirm the version stamp matches `installed_version`, and that `## Credential Loading`, `## Workspace Defaults` and `## Workspace Structure` are all present.
-- **Working folders** — confirm both exist and both env vars are set.
+- **Working folders** — confirm all three exist and all three env vars are set.
+- **Apollo connector** — confirm the `mcp__apollo__*` tools are visible. Do not spend a credit proving it.
 - **Browser download location** — run the round-trip check: have the user download any small file, then confirm it appears in `exports/` from the sandbox (`os.listdir("exports")`). Asking is not enough; this is the one that silently breaks the scheduled run.
-- **Scheduled tasks** — ask the user to confirm both `Adana · CoStar Collection` and `Adana · LexisNexis Enrichment` now appear in Cowork → Scheduled, and that the legacy `Adana · Weekly Collection` is gone.
+- **Scheduled tasks** — ask the user to confirm `Adana · CoStar Collection` and `Adana · Apollo Email Lookup` now appear in Cowork → Scheduled, and that **both** retired tasks (`Adana · LexisNexis Enrichment`, `Adana · Weekly Collection`) are gone.
 
 Show a result table:
 

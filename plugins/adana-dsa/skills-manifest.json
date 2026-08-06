@@ -2,12 +2,10 @@
   {
     "name": "costar-saved-search",
     "area": "Collection",
-    "use_for": "Run a CoStar saved search, export it (Industrial saved layout), screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + broker contacts, and write back the qualification (score + why + buy-box checklist).",
+    "use_for": "Process a CoStar export the user has placed in the project folder: screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + contacts, and write back the qualification (score + why + buy-box checklist).",
     "description": ">-",
     "deps": {
-      "mcp": [
-        "Claude computer (computer use)"
-      ],
+      "mcp": [],
       "gateway": [
         "adana_screen_costar",
         "adana_ingest_costar_export",
@@ -26,18 +24,17 @@
   {
     "name": "reonomy-saved-search",
     "area": "Collection",
-    "use_for": "Run a Reonomy saved search, export it, persist deduped off-market properties + owner contact shells (flow2), and write back a judgment-led qualification.",
+    "use_for": "Process a Reonomy export the user has placed in the project folder: persist deduped off-market properties + owner contact shells (flow2), and write back a judgment-led qualification.",
     "description": ">-",
     "deps": {
-      "mcp": [
-        "Claude computer (computer use)"
-      ],
+      "mcp": [],
       "gateway": [
         "adana_ingest_reonomy",
         "adana_save_qualification"
       ],
       "files": [
-        "exports/*.csv (read)"
+        "exports/*.csv (read)",
+        "exports/.processed.json (read+write)"
       ],
       "env": [
         "gateway_api_key",
@@ -47,21 +44,42 @@
     "version": null
   },
   {
-    "name": "lexisnexis-contact-lookup",
+    "name": "apollo-email-lookup",
     "area": "Enrichment",
-    "use_for": "Pull pending contacts from the gateway (or a spreadsheet), look up phones/emails via LexisNexis SmartLinx, write the results back, and produce a CSV.",
+    "use_for": "Find work emails for contacts missing one, via the Apollo API (no browser): pull the gateway work list, verify each person by search before enriching, bulk-enrich by exact ID, and write the verified emails back.",
     "description": ">-",
     "deps": {
       "mcp": [
-        "Claude computer (computer use)"
+        "apollo (Apollo.io connector)"
       ],
       "gateway": [
         "adana_targets_needing_enrichment",
         "adana_save_contact_lookups"
       ],
       "files": [
-        "lexisnexis/results.json (read+write)",
-        "lexisnexis/output_<date>.csv (write)"
+        "apollo/results_<date>.json (write)"
+      ],
+      "env": [
+        "gateway_api_key",
+        "APOLLO_DIR"
+      ]
+    },
+    "version": null
+  },
+  {
+    "name": "lexisnexis-contact-lookup",
+    "area": "Enrichment",
+    "use_for": "Emit a work-list sheet of contacts missing an email, then read the user's completed LexisNexis results back from the project folder and write the emails/phones through the gateway.",
+    "description": ">-",
+    "deps": {
+      "mcp": [],
+      "gateway": [
+        "adana_targets_needing_enrichment",
+        "adana_save_contact_lookups"
+      ],
+      "files": [
+        "lexisnexis/worklist_<date>.csv (write)",
+        "lexisnexis/results_<date>.csv (read)"
       ],
       "env": [
         "gateway_api_key",
@@ -73,7 +91,7 @@
   {
     "name": "adana-setup",
     "area": "Setup",
-    "use_for": "Run once to wire up the Adana plugin in a new workspace: gateway API key, connector registration, Claude computer (computer use) check, export folders + browser download location, and CLAUDE.md creation.",
+    "use_for": "Run once to wire up the Adana plugin in a new workspace: gateway API key, connector registration (gateway + Apollo), working folders, browser download location, and CLAUDE.md creation.",
     "description": ">-",
     "deps": {
       "mcp": [],

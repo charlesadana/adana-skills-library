@@ -2,12 +2,12 @@
 name: adana-setup
 description: >-
   First-time setup for the Adana deal-sourcing plugin — configure the gateway
-  API key, register the gateway connector, confirm Claude computer (computer
-  use), create the export/working folders and point the browser's download
-  location at them, and write
-  the workspace CLAUDE.md so adana.md loads automatically on every session.
+  API key, register the gateway and Apollo connectors, create the working folders,
+  point the browser's download location at the export folder, confirm Claude
+  computer for the one skill that still drives a browser, and write the workspace
+  CLAUDE.md so adana.md loads automatically on every session.
 area: Setup
-use_for: "Run once to wire up the Adana plugin in a new workspace: gateway API key, connector registration, Claude computer (computer use) check, export folders + browser download location, and CLAUDE.md creation."
+use_for: "Run once to wire up the Adana plugin in a new workspace: gateway API key, connector registration (gateway + Apollo), working folders, browser download location, and CLAUDE.md creation."
 deps:
   mcp: []
   gateway: []
@@ -92,26 +92,55 @@ Ask the user to add it in Cowork:
 
 Ask: "Have you added the gateway connector?" Wait for confirmation before moving on.
 
-## Step 4 — Claude computer (computer use)
+### 3b. Apollo connector (for email lookup)
 
-All three skills drive the user's already-logged-in browser via **Claude computer (computer use)** — Claude operates the computer by taking screenshots and issuing mouse/keyboard actions. Ask:
-> Is Claude computer (computer use) connected, and is a browser window open on the computer Claude controls?
+`apollo-email-lookup` finds broker emails through Apollo's API. Apollo ships as a
+**ready-made connector** — it is not a custom URL like the gateway. Ask the user to:
 
-If not, direct them to enable computer use and open a browser on that computer, then come back.
+1. Go to **Settings → Connectors**
+2. Find **Apollo.io** in the available connectors and click **Connect**
+3. Complete the Apollo sign-in / authorisation prompt
 
-Also confirm they know each skill needs the relevant source already signed in before it runs — Claude never enters credentials:
+There is no API key to paste — Apollo authorises via OAuth in that flow.
 
-| Skill | Must be signed into |
-|---|---|
-| `costar-saved-search` | CoStar — `product.costar.com` |
-| `reonomy-saved-search` | Reonomy — `app.reonomy.com` |
-| `lexisnexis-contact-lookup` | LexisNexis — `advance.lexis.com` (Public Records access) |
+> **Check the tool names once it's connected.** The skill's `allowed-tools` assume
+> the tools arrive as `mcp__apollo__*`. Connectors are sometimes registered under a
+> longer label, which would make them `mcp__apollo_io__*` or similar. If the skill
+> reports the Apollo tools as missing while the connector is plainly connected,
+> that prefix is why — check the real names and correct the skill's frontmatter.
+
+This connector is **optional**: skip it if the user doesn't have an Apollo
+subscription. Everything else still works, and contact enrichment falls back to
+`lexisnexis-contact-lookup` alone — slower and manual, but functional.
+
+## Step 4 — Who does what
+
+Set expectations here. **Nothing in this plugin drives a browser** — Claude never
+signs into a source, never clicks through a UI, and never enters credentials. Work
+arrives as files, and the only automated calls go to the gateway and Apollo APIs.
+
+| Skill | Where its input comes from | Who does what |
+|---|---|---|
+| `costar-saved-search` | CoStar export in `exports/` | **You export; the skill processes the file** |
+| `reonomy-saved-search` | Reonomy CSV in `exports/` | **You export; the skill processes the file** |
+| `lexisnexis-contact-lookup` | a worksheet in `lexisnexis/` | **The skill writes the list; you run the lookups; the skill reads your results back** |
+| `apollo-email-lookup` | the Apollo API | Fully automatic — no file, no login |
+
+So the sign-ins that matter are **theirs**, in their own browser, on their own time:
+
+- **CoStar** (`product.costar.com`) — to produce the export.
+- **Reonomy** (`app.reonomy.com`) — to produce the off-market export, if they use it.
+- **LexisNexis** (`advance.lexis.com`, Public Records access) — to run the person lookups.
+
+There is no computer-use or browser-automation setup to do. If they have used an
+earlier version of this plugin, say so explicitly — it used to drive their browser,
+and that is the one habit that has changed.
 
 ## Step 5 — Project working folders + browser download location
 
-The collection skills **export** from CoStar and Reonomy rather than scraping the results grid — a grid read never completes on a real saved search. That means CoStar's export has to land somewhere the skill can read it.
+Everything moves between the user and the skills as **files in the project folder**. CoStar exports arrive there, LexisNexis work lists leave and come back there, and Apollo writes its run log there.
 
-This is the one step with a foot in two worlds: **the browser runs on the computer Claude controls; the skill runs in the Cowork sandbox.** The project folder is visible to both, so that's where the export goes.
+This is the step with a foot in two worlds: **the user's browser runs on their own machine; the skills run in the Cowork sandbox.** The project folder is visible to both, so that's the handover point — and getting it wrong is why a file "downloaded fine" but the skill can't see it.
 
 ### 5a. Create the folders
 
@@ -119,16 +148,21 @@ Create these under the project root (cwd — the same folder that holds `CLAUDE.
 
 ```python
 import os
-for d in ("exports", "lexisnexis"):
+for d in ("exports", "lexisnexis", "apollo"):
     os.makedirs(d, exist_ok=True)
 ```
 
 ```
-exports/      — every browser download lands here: CoStar .xlsx, Reonomy .csv
-lexisnexis/   — results.json (resume), output_<date>.csv, optional input sheet
+exports/      — CoStar .xlsx (the user exports), Reonomy .csv (Claude downloads)
+lexisnexis/   — worklist_<date>.csv out to the user, results_<date>.csv back
+apollo/       — results_<date>.json: which candidate was matched to each contact, and why
 ```
 
-**One export folder, not one per source.** The browser has a *single* global download location — it cannot be set per-site. So both CoStar and Reonomy exports land in `exports/`, and the skills tell them apart by filename (`CostarExport*.xlsx` vs Reonomy's `.csv`).
+Only `exports/` receives browser downloads. `lexisnexis/` is a two-way workspace
+between the user and the skill, and `apollo/` is a run log the skill writes for
+auditing.
+
+**One export folder, not one per source.** The browser has a *single* global download location — it cannot be set per-site. So CoStar and Reonomy files both land in `exports/`, and the skills tell them apart by filename (`CostarExport*.xlsx` vs Reonomy's `.csv`).
 
 ### 5b. Record the paths
 
@@ -138,7 +172,8 @@ Write them into `.claude/settings.local.json` under `env`. Read the file first a
 {
   "env": {
     "ADANA_EXPORT_DIR": "exports",
-    "LEXISNEXIS_DIR": "lexisnexis"
+    "LEXISNEXIS_DIR": "lexisnexis",
+    "APOLLO_DIR": "apollo"
   }
 }
 ```
@@ -147,18 +182,24 @@ They are also written into `CLAUDE.md` under `## Workspace Defaults` in Step 6 �
 
 ### 5c. Point the browser at the export folder
 
+This is a **convenience, not a requirement**: with it set, their exports land in
+`exports/` by themselves instead of having to be moved out of Downloads each time.
+Skipping it costs them one drag per export and nothing else.
+
 Get the **host-side absolute path** to the project's `exports/` — the path as the user's own machine sees it, not the sandbox path. Ask them for it if you can't determine it (in Cowork the project was created from an existing folder, so they know where it is).
 
 Then:
-> In the browser: **Settings → Downloads → Location** → set it to `<host path>/exports`
+> In your browser: **Settings → Downloads → Location** → set it to `<host path>/exports`
 >
-> Also make sure **"Ask where to save each file" is OFF.** That toggle opens a native operating-system save dialog, which is not a web page — Claude cannot click it, and it would hang the scheduled Monday run forever.
+> Also turn **"Ask where to save each file" OFF**, so downloads don't stop on a save dialog each time.
 
-**This is a global browser setting**, so everything they download from now on lands there — not just Adana exports. That's the trade for the export working unattended. Say so plainly; don't let them discover it later.
+**This is a global browser setting**, so everything they download from now on lands there — not just Adana exports. Say so plainly; don't let them discover it later. If they'd rather not change it, that's fine — they just move the export into `exports/` by hand after each download.
+
+It applies to Reonomy exports too — both sources download into the same folder.
 
 ### 5d. Confirm the round-trip
 
-Do not take this on trust — it is the single most likely thing to be silently wrong, and it fails on a Monday morning with nobody watching.
+Do not take this on trust — a file that "downloaded fine" but landed somewhere the sandbox can't see is the most common way a run fails, and it looks identical to an empty search.
 
 Ask the user to download any small file in the browser. Then check that it appears in the export folder from the sandbox:
 
@@ -167,7 +208,7 @@ import os
 print(os.listdir(os.environ.get("ADANA_EXPORT_DIR", "exports")))
 ```
 
-If the file isn't there, the browser's download location is pointing at a folder the sandbox can't see. Stop and fix it before continuing — every collection run depends on this.
+If the file isn't there, the download location is pointing at a folder the sandbox can't see. Fix it now, or agree that they will move exports in by hand — but establish which, because the skills will report "no export found" either way.
 
 ## Step 6 — Create workspace CLAUDE.md
 
@@ -285,6 +326,7 @@ Hardcoded here at setup time so any session — including a scheduled run — ha
 
 - **Exports:** `exports/` (env: `ADANA_EXPORT_DIR`) — **the browser's download location points here.** Both CoStar and Reonomy exports land in this one folder; the browser has only a single global download location, so they are told apart by filename.
 - **LexisNexis working dir:** `lexisnexis/` (env: `LEXISNEXIS_DIR`)
+- **Apollo working dir:** `apollo/` (env: `APOLLO_DIR`)
 
 **Fallback rule:** if a value above looks empty or stale (e.g. this `CLAUDE.md` was copied from another workspace), run the credential loader and read from env instead:
 
@@ -292,15 +334,20 @@ Hardcoded here at setup time so any session — including a scheduled run — ha
 
 ## Workspace Structure
 
-    exports/            — the browser's download location; every export lands here
-      ├─ CostarExport*.xlsx   — CoStar (Industrial saved layout)
-      └─ *.csv                — Reonomy
-    lexisnexis/
-      ├─ results.json         — per-person lookup results; resume point for a failed batch
-      └─ output_<date>.csv    — the enrichment deliverable
+    exports/            — the browser's download location
+      ├─ CostarExport*.xlsx   — CoStar, exported by you (Industrial saved layout)
+      ├─ *.csv                — Reonomy
+      └─ .processed.json      — which exports have already been ingested
+    lexisnexis/         — the two-way workspace for person lookups
+      ├─ worklist_<date>.csv  — written for you: who still needs an email
+      └─ results_<date>.csv   — what you found, read back and written to the gateway
+    apollo/
+      └─ results_<date>.json  — which Apollo person was matched to each contact, and why
     .claude/settings.local.json  — GATEWAY_API_KEY + the folder paths above
 
-All paths are **relative to the project root** (cwd). Nothing here is the source of truth — the gateway is. These are working artifacts, and it is safe to delete them between runs.
+All paths are **relative to the project root** (cwd). Nothing here is the source of truth — the gateway is. These are working artifacts.
+
+Exports accumulate — nothing is deleted automatically, so an old file sits there looking exactly like a fresh one. `.processed.json` is how the CoStar skill tells them apart: it records which exports have already been ingested, so a scheduled run picks up only what's new and never double-counts. **Don't delete it** unless you intend the whole folder to be treated as unprocessed.
 ````
 
 **If `CLAUDE.md` already exists:**
@@ -323,51 +370,74 @@ Read back `CLAUDE.md` and confirm:
 
 ## Step 7 — Schedule the two weekly jobs
 
-From here, two jobs run on their own as **separate** Cowork tasks:
+From here, two jobs run on their own as **separate** Cowork tasks, staggered on the same Monday:
 
 - **CoStar collection** — exports the CoStar saved search and ingests it (properties land in `needs_enrichment`).
-- **LexisNexis enrichment** — looks up contacts for every property sitting in `needs_enrichment` and writes them back.
+- **Apollo email lookup** — finds work emails via API for the contacts CoStar just queued.
 
-They are separate on purpose, and **staggered on the same Monday**. LexisNexis enriches whatever CoStar has already queued, so it must run *after* CoStar finishes — a few hours later the same day. This matches the pipeline order: a property needs a contact before it can be qualified. One combined task would force enrichment to run inside the same block as the collection it depends on.
+They are separate on purpose and run in that order, because the second depends on the first: there is nothing to enrich until collection has created the contacts. One combined task would force enrichment to run inside the same block as the collection it depends on.
 
-**What puts a property into Gate 1 is the CoStar run itself**, not a later cron. The collection skill scores each property as it ingests it (Step 7 of `costar-saved-search`), and the gateway promotes the ones that have a contact and a strong enough conviction score. The gateway's Tuesday screen only refreshes the deterministic price baseline — it does not qualify anything. So if a week's CoStar run doesn't happen, nothing new reaches Gate 1 that week; there is no cron that will catch up on the judgment for you.
+**Apollo is the only job that is fully unattended.** It is a plain API call — seconds per contact, no browser, no login, nothing to place beforehand. It runs whether or not anyone did anything that morning.
 
-**Reonomy is not scheduled.** Run `/adana-dsa:reonomy-saved-search` by hand whenever you want off-market owners; its output flows into the same `needs_enrichment` queue, so the next LexisNexis run — scheduled or manual — picks it up. Neither scheduled task depends on Reonomy having run.
+**The CoStar task is a poller.** It doesn't log into CoStar; it checks `exports/` and processes anything it hasn't seen before. Explain it that way:
+
+> Drop your CoStar exports into `exports/` whenever you like — Monday morning, or across the week. The scheduled job checks that folder and processes anything new. If nothing new is there it just says so and stops, and it never reprocesses a file it has already done. Several exports waiting is fine: it takes them one at a time.
+
+That is why the export doesn't have to be timed to the job. The skill tracks what it has already ingested in `exports/.processed.json`, so the schedule is simply how often it looks.
+
+**LexisNexis is not scheduled.** The lookups are the user's own work — 15–20 seconds a person, judging each match — so there is nothing for a scheduled job to do beyond writing a list nobody is there to work. Run `/adana-dsa:lexisnexis-contact-lookup` by hand, and expect the list to be short now that Apollo runs first.
+
+**Reonomy is not scheduled either.** Run `/adana-dsa:reonomy-saved-search` on demand when you want off-market owners; its output flows into the same enrichment queue.
+
+**What puts a property into Gate 1 is the CoStar run itself**, not a later cron. `costar-saved-search` scores each property as it ingests it (its "Qualify and write back" step), and the gateway promotes the ones that have a contact and a strong enough conviction score. The gateway's Tuesday screen only refreshes the deterministic price baseline — it does not qualify anything. So if a week's CoStar run doesn't happen, nothing new reaches Gate 1 that week; there is no cron that will catch up on the judgment for you.
 
 **Use Cowork's `/schedule` — do not ask the user to click through settings.** Invoke `/schedule` directly **once per task**, giving it the name, frequency, and prompt. Cowork asks them to confirm, and each task appears on its Scheduled page.
 
-Ask the user for **two** times on Monday (defaults: **CoStar 9 AM**, **LexisNexis 2 PM**). Keep at least a few hours between them so collection finishes before enrichment starts. Then create both:
+Ask the user for **two** times on Monday (defaults: **CoStar 9 AM**, **Apollo 11 AM**). Leave a couple of hours between them so collection has finished before the lookup starts. Then create both:
 
 **Task 1 — `Adana · CoStar Collection`** · frequency **Weekly, Monday** at the first time:
 
 ```
-Run /adana-dsa:costar-saved-search to completion.
-Then summarise the counts returned by the gateway (new properties found, updated, queued for enrichment).
+Run /adana-dsa:costar-saved-search to completion. It checks exports/ for any CoStar export not yet processed and ingests each one.
+If nothing new is there, say so and stop — never reprocess a file already recorded in exports/.processed.json.
+Then summarise the counts returned by the gateway (new properties found, updated, contacts, queued for enrichment).
 ```
 
-**Task 2 — `Adana · LexisNexis Enrichment`** · frequency **Weekly, Monday** at the second, later time:
+**Task 2 — `Adana · Apollo Email Lookup`** · frequency **Weekly, Monday** at the second time:
 
 ```
-Run /adana-dsa:lexisnexis-contact-lookup to completion. It processes every property currently in needs_enrichment — whatever CoStar queued this morning, plus anything a manual Reonomy run added.
-Then summarise the counts returned by the gateway (contacts enriched, properties still without a contact).
+Run /adana-dsa:apollo-email-lookup to completion. It works the gateway's list of contacts that still have no email — whatever CoStar queued this morning, plus anything still outstanding from previous weeks.
+Then summarise: how many were confirmed and enriched, how many are left for a manual LexisNexis pass, and how many Apollo credits remain.
 ```
+
+If the user has no Apollo subscription, create Task 1 only and say plainly that enrichment is then entirely manual.
 
 **Both schedules live in Cowork only.** To see or change when they run, open Cowork → Scheduled. There is no other copy.
 
 Then tell the user plainly:
 
-> These jobs only run while this computer is on and Cowork is running. If it's off on Monday, that week's run is missed — and there's no catch-up for properties that aged off CoStar in the meantime. So: **keep an eye on the gateway → Runs page.** If a Monday goes by with no new CoStar or LexisNexis run logged, something is wrong — open Cowork and check the Scheduled tab.
+> These jobs only run while this computer is on and Cowork is running. If it's off on Monday, that week's run is missed — and there's no catch-up for properties that aged off CoStar in the meantime. So: **keep an eye on the gateway → Runs page.** If a Monday goes by with no new CoStar or Apollo run logged, something is wrong — open Cowork and check the Scheduled tab.
 
 ## Done
 
 Summarise what was configured:
 - Gateway API key saved to `.claude/settings.local.json`
-- Gateway connector registered
-- Claude computer (computer use) confirmed
-- Working folders created (`exports/`, `lexisnexis/`); the browser's download location points at `exports/` (round-trip verified)
+- Gateway connector registered; Apollo connector registered (or skipped)
+- No browser automation to configure — every skill works from files or APIs
+- Working folders created (`exports/`, `lexisnexis/`, `apollo/`); browser downloads land in `exports/` (round-trip verified)
 - CLAUDE.md created — Adana agent + credential loader + workspace defaults
-- Two weekly tasks scheduled for Mondays: `Adana · CoStar Collection`, then `Adana · LexisNexis Enrichment`. Reonomy runs on demand.
+- Two weekly tasks scheduled for Mondays: `Adana · CoStar Collection`, then `Adana · Apollo Email Lookup`
+- Run on demand: `/adana-dsa:reonomy-saved-search` for off-market owners, `/adana-dsa:lexisnexis-contact-lookup` for whatever Apollo can't resolve
 
-The pipeline is live: CoStar collects Monday morning and scores what it ingests (→ `needs_enrichment`, or `qualified` where a contact came down with the export and the score is strong enough) → LexisNexis enriches Monday afternoon (→ `enriched`, which lets held properties qualify) → Gate 1 review → outreach. Run Reonomy by hand when you want off-market owners.
+Then set the rhythm out plainly, because **one part of it is theirs**:
 
-Note the judgment is the skill's, not a cron's: the gateway decides *which* scored properties reach Gate 1, but it never scores one itself.
+> **You, whenever:** drop CoStar exports into `exports/`. No need to time it to the job.
+> **Monday 9 AM:** the CoStar job picks up anything new — properties in, scored, the strong ones into Gate 1. Nothing new, nothing happens.
+> **Monday 11 AM:** Apollo looks up the missing emails on its own.
+> **When you have time:** run LexisNexis on whatever Apollo couldn't resolve, and Reonomy if you want off-market owners.
+> **Then:** review Gate 1 and approve outreach.
+
+Two things worth stating so they aren't discovered later:
+
+- **The judgment is the skill's, not a cron's.** The gateway decides *which* scored properties reach Gate 1, but it never scores one itself. No CoStar run that week means nothing new to review that week.
+- **Nothing catches up.** A missed Monday is a missed week; properties that aged off CoStar in the meantime are simply gone.

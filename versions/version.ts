@@ -1,5 +1,5 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.5.4';
+const DEFAULT_VERSION = 'v0.6.0';
 const DEFAULT_DATE = 'Aug 6, 2026';
 
 // Export constants initially with default values
@@ -9,6 +9,23 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.6.0',
+    date: 'Aug 6, 2026',
+    changes: [
+      'Claude computer (computer use) is removed from the plugin entirely. Every skill that drove the user\'s logged-in browser now works from a file instead: `costar-saved-search` and `reonomy-saved-search` process an export the user places in `exports/`, and `lexisnexis-contact-lookup` writes a work-list spreadsheet the user fills in and hands back. No skill signs into a source, clicks through a UI, or handles credentials. `deps.mcp` is now empty for every skill except `apollo-email-lookup`, whose only dependency is the Apollo connector.',
+      'New skill `apollo-email-lookup` (Enrichment) — finds work emails through Apollo\'s API. Search first to identify the right person, verify the match, then enrich by exact Apollo ID. Built from a measured 20-broker test: 58% confirmed, 90% of those returned a verified email (~52% end to end) at about 2.2 cents each. The search step is free and the enrichment credit is charged per ATTEMPT rather than per success, which is why verification comes before spending anything. Encodes the failure found in testing: a name-only `people_match` returns a hollow record for a different person of the same name and still costs a credit.',
+      'Enrichment now has an explicit order — Apollo first, LexisNexis second. Apollo is unattended and resolves the common case (a named broker at a real firm), so running it first keeps the manual LexisNexis sheet short. Documented in agents/adana.md and in both skills.',
+      'Scheduling changed to reflect what can actually run unattended. `Adana · LexisNexis Enrichment` is retired as a scheduled task — the lookups are the user\'s own work, and an unattended run would produce a list nobody is there to fill in. `Adana · Apollo Email Lookup` takes its Monday slot. plugin-update Step 3d deletes the retired task before creating the new one, and handles workspaces still carrying the pre-v0.4.0 combined task.',
+      'The CoStar schedule is kept but reframed as a POLLER: the user drops exports into `exports/` whenever suits them, and the scheduled run processes anything it has not seen. Processed files are tracked in `exports/.processed.json` keyed by filename AND mtime, so a re-export under the same filename is still picked up, and an already-ingested file is never counted twice. "Nothing new to process" is an explicitly valid outcome — the skill says so and stops rather than reprocessing the newest file to have something to report. Files are marked processed only after a successful ingest, so a run that fails midway is retried rather than silently lost.',
+      'costar-saved-search and lexisnexis-contact-lookup were rewritten rather than patched, to remove the artifacts of incremental edits — a stub "Step 5 — Contacts (already done in Step 3)" that only pointed back at another step, and a blockquote narrating what the step "used to say". CoStar is now 5 steps (get the export → read rows → screen → ingest → qualify), LexisNexis 4 (get the list → write the sheet → read it back → write through). The rules survive; the archaeology does not.',
+      'lexisnexis-contact-lookup is now a worksheet round-trip. It writes `worklist_<date>.csv` carrying `contact_id`, a `search_by` column telling the user how to search each row (owners by property address, brokers by name + state only, because a listing agent does not live at the property), and `already_has_phone` marking rows where only the email is wanted. It reads `results_<date>.csv` back, validates before writing — skipping rows with a missing `contact_id` or an `@`-less email — and suppresses the phone for any row already carrying a listing-sourced number. The old `results.json` resume machinery is gone: it existed to survive a crash mid-browser-batch, and there is no batch any more.',
+      'reonomy-saved-search rewritten to the same file-driven shape, sharing `exports/.processed.json` with CoStar (no collision — Reonomy exports are .csv, CoStar .xlsx). Adds a header sanity check before ingesting, since `*.csv` is a far looser match than CoStar\'s filename pattern and any stray CSV in the folder would otherwise be mapped as property data. The old "the export UI steps below are unverified — read the page and adapt" warning is dropped; it existed because Claude was guessing at Reonomy\'s buttons, and the user knows their own UI.',
+      'adana-setup: new Step 3b connects the Apollo connector (a ready-made connector authorised via OAuth, not a custom URL — and optional, since the pipeline still runs without it). Step 4 became "Who does what", a table of which half of each skill belongs to the user, with no computer-use setup at all. New `apollo/` folder and `APOLLO_DIR` env var. The browser download location is now documented as a convenience rather than a requirement — skipping it costs one drag per export.',
+      'plugin-update detects everything above: `APOLLO_DIR`, the `apollo/` folder, the Apollo connector (checked by tool presence, never by spending a credit), the new skill, the retired LexisNexis task. It also states the workflow change out loud, because nothing errors to signal it — the skills keep their names and jobs, and the user simply finds that exporting is now theirs to do.',
+      'plugin.json version was stale at 0.5.1 and had missed several releases; bumped to 0.6.0 with `apollo` and `contact-enrichment` keywords and a description that no longer claims browser automation.',
+    ],
+  },
   {
     version: 'v0.5.4',
     date: 'Aug 6, 2026',

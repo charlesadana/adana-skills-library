@@ -1,132 +1,152 @@
 ---
 name: costar-saved-search
 description: >-
-  Run a CoStar saved search end-to-end for Adana deal sourcing: open it in the
-  logged-in browser session on the computer Claude controls, export it with the
-  Industrial saved layout, screen
-  the listings against the FAR / PLSF / PSFB land-vs-building criteria (via the
-  gateway), and persist the deduped properties + broker contacts through the
-  Adana gateway. Use this whenever the user names one of their CoStar saved
-  searches (e.g. "Hamptons IOS", "NEW PRODUCT", "Montana", "IOS For Sale
-  Southeast") and asks to run, pull, export, refresh, or screen it — even
-  casually like "run Montana through CoStar" or "pull the NEW PRODUCT search and
-  tell me what fits". If the user mentions a CoStar saved search by name, this
-  skill almost certainly applies.
+  Process a CoStar saved-search export for Adana deal sourcing: read the
+  spreadsheet the user exported into the project folder, screen the listings
+  against the FAR / PLSF / PSFB land-vs-building criteria (via the gateway),
+  persist the deduped properties and their broker/owner contacts, and write back
+  a qualification for each. The user runs the CoStar export themselves; this skill
+  takes over from the file. Use this whenever the user names one of their CoStar
+  saved searches (e.g. "Hamptons IOS", "NEW PRODUCT", "Montana", "IOS For Sale
+  Southeast") and asks to run, pull, process, refresh or screen it — including
+  casually, like "run Montana through CoStar" or "I've dropped the export in, take
+  it from here".
 allowed-tools: mcp__gateway__adana_screen_costar mcp__gateway__adana_ingest_costar_export mcp__gateway__adana_save_qualification
 area: Collection
-use_for: "Run a CoStar saved search, export it (Industrial saved layout), screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + broker contacts, and write back the qualification (score + why + buy-box checklist)."
+use_for: "Process a CoStar export the user has placed in the project folder: screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + contacts, and write back the qualification (score + why + buy-box checklist)."
 deps:
-  mcp: ["Claude computer (computer use)"]
+  mcp: []
   gateway: ["adana_screen_costar", "adana_ingest_costar_export", "adana_save_qualification"]
   files: ["exports/CostarExport*.xlsx (read)"]
   env: ["gateway_api_key", "ADANA_EXPORT_DIR"]
 ---
 
-# CoStar saved-search → export → screen → ingest
+# CoStar export → screen → ingest → qualify
 
-This automates the CoStar half of Adana's deal sourcing. The only thing that
-changes between runs is **which saved search** to pull — treat the saved-search
-name the user gives you as the single parameter.
+**The user exports from CoStar; this skill starts at the file.** No browser, no
+login, no automation of CoStar's UI — the spreadsheet in `exports/` is the
+interface between their half and yours.
 
-**Export the result set; never read the grid row-by-row.** A real saved search
-returns far more rows than the browser tools can walk, and that approach does not
-complete. Everything is persisted through the **gateway** MCP — the export file
-is a working artifact, not the record.
+Everything is persisted through the **gateway** MCP. The export file is a working
+artifact; the gateway is the record.
 
 Read `agents/adana.md` first for the gateway connection rules and the
 `${GATEWAY_API_KEY}` convention.
 
 ## Prerequisites
 
-- The user is logged into CoStar in the browser running on the computer Claude controls.
-- `GATEWAY_API_KEY` is loaded — run `load_credentials()` from CLAUDE.md's **Credential Loading** section before the first `adana_*` call. Scheduled runs do not inject it automatically.
-- The browser's download location points at the project's `exports/` folder (set by `/adana-dsa:adana-setup` Step 5). Without this the export lands somewhere the skill cannot read.
+- A **fresh CoStar export** in the project's `exports/` folder
+  (`$ADANA_EXPORT_DIR`, default `exports/`), produced with the **Industrial saved
+  layout**. Step 1 walks the user through it.
+- `GATEWAY_API_KEY` is loaded — run `load_credentials()` from CLAUDE.md's
+  **Credential Loading** section before the first `adana_*` call. Scheduled runs
+  do not inject it automatically.
 
-Set up a task list and **confirm the saved-search name** before driving the browser.
+## Step 1 — Get the export
 
-## Step 1 — Open the saved search
+If the user has already exported and said so, go to Step 2. Otherwise give them
+the recipe. **The layout choice is the part that matters**: the wrong one produces
+a file that looks fine but is missing the columns everything downstream needs.
 
-Use Claude computer (computer use). Open the browser on the controlled
-computer, then:
+> In CoStar:
+> 1. **Properties → All Properties**, then **Save → OPEN SAVED SEARCH** and pick your saved search. Let the count settle — it can flash something like "17,001" mid-load, which isn't the real number.
+> 2. **More → Export**.
+> 3. Under **Selected Field Layout**, scroll past "PRE-DEFINED LAYOUTS" to the separate **"SAVED LAYOUTS"** section and choose **Industrial** from *there*. Not the pre-defined Industrial — they are different layouts, and only the saved one carries For Sale Price, RBA, Land Area (AC) and the contact columns.
+> 4. Leave **File type** as "Microsoft Excel File" and click **Export**.
+> 5. Put the file in this project's **`exports/`** folder and tell me.
 
-1. Go to the **Properties** → **All Properties** search page
-   (`https://product.costar.com/search/all-properties`).
-2. Click **Save** in the search toolbar. A dropdown lists saved searches under
-   "OPEN SAVED SEARCH".
-3. Click the saved search whose name matches the user's request.
+If their browser already downloads to `exports/` (`/adana-dsa:adana-setup` Step 5),
+the last step happens on its own.
 
-The map/results re-render and the property count settles. The count can flash a
-huge number (e.g. "17,001") mid-load — wait for it to settle to the real count.
+**You need the saved-search name** for the `location` argument at ingest, and the
+file doesn't record it. Ask when running interactively. On a scheduled run there
+is nobody to ask, so infer it from the filename if the user names their exports,
+and otherwise pass the best label you have — `location` is a reporting label, not
+a key, so an imperfect one is far better than skipping the ingest.
 
-Tip: work from screenshots — take one, locate the control visually, then click
-its coordinates. Toolbar buttons can scroll off the right edge, so scroll the
-toolbar into view before clicking; take a fresh screenshot whenever the page
-re-renders rather than reusing stale coordinates.
+### Find what's new
 
-Edge case — **no saved search by that name**: the Save dropdown shows what
-exists. If the requested name isn't there, list the available ones and ask which
-they meant.
-
-## Step 2 — Export with the Industrial saved layout
-
-**Export the result set; do not read the grid.** A real saved search returns far
-more rows than the browser tools can walk, and a row-by-row read will never finish.
-The export is the only approach that works at real result-set sizes.
-
-1. Click **More** → **Export**. The "Export Data" dialog opens.
-2. Open the **Selected Field Layout** dropdown. It has a "PRE-DEFINED LAYOUTS"
-   section AND, lower down, a separate **"SAVED LAYOUTS"** section. Scroll down
-   and choose **Industrial under SAVED LAYOUTS — not the pre-defined one.** The
-   saved layout is the one that produces the columns this skill expects: Last
-   Sale Date, For Sale Price, Cap Rate, Property Address, City, State, Zip, RBA,
-   Land Area (AC).
-3. Leave **File type** as "Microsoft Excel File". Click **Export**.
-
-The browser drops the file into the project's export folder (`$ADANA_EXPORT_DIR`,
-default `exports/`) — `adana-setup` Step 5 pointed the browser's download
-location there. It lands as `CostarExport.xlsx`, or `CostarExport (N).xlsx` if
-earlier copies exist.
-
-Downloading is the intent here, so it's fine to proceed.
-
-If nothing appears in the folder, the browser's download location is wrong — stop
-and have the user re-run `/adana-dsa:adana-setup` Step 5 rather than falling back
-to scraping the grid.
-
-## Step 3 — Read the export into rows
-
-Read the **newest** `CostarExport*.xlsx` from the export folder and build one row
-per listing with the **raw** columns. Do **not** compute FAR, PSFB or PLSF — the
-gateway derives them.
+The user drops exports into `exports/` whenever they like, and this skill runs on
+a schedule as well as on request — so the question is never "is this file recent?"
+but **"have I already processed it?"**. Nothing is deleted from `exports/`, so
+that has to be tracked explicitly.
 
 ```python
-import glob, os
-import openpyxl
+import glob, json, os, datetime
 
 export_dir = os.environ.get("ADANA_EXPORT_DIR", "exports")
-files = glob.glob(os.path.join(export_dir, "CostarExport*.xlsx"))
-if not files:
-    raise SystemExit(f"No CostarExport*.xlsx in {export_dir}/ — did the export land?")
-newest = max(files, key=os.path.getmtime)
+marker = os.path.join(export_dir, ".processed.json")
 
-ws = openpyxl.load_workbook(newest, data_only=True).active
+seen = {}
+if os.path.exists(marker):
+    with open(marker, encoding="utf-8") as f:
+        seen = json.load(f)          # {filename: mtime_when_processed}
+
+files = sorted(glob.glob(os.path.join(export_dir, "CostarExport*.xlsx")),
+               key=os.path.getmtime)
+todo = [f for f in files
+        if seen.get(os.path.basename(f)) != os.path.getmtime(f)]
+
+for f in files:
+    mark = "NEW" if f in todo else "done"
+    age_h = (datetime.datetime.now().timestamp() - os.path.getmtime(f)) / 3600
+    print(f"  [{mark:4}] {os.path.basename(f)} — {age_h:.1f}h old")
+print(f"{len(todo)} export(s) to process, {len(files) - len(todo)} already done")
+```
+
+**If `todo` is empty, stop and say so.** On a scheduled run that is the normal
+outcome for any week the user hasn't exported — report it plainly and exit. Do not
+reprocess the newest file to have something to do: re-ingesting last week's export
+produces a run that looks clean and collected nothing.
+
+**Process each new file separately**, oldest first, each with its own `location`.
+Several exports can accumulate between runs — different saved searches, or a
+re-export after a correction — and merging them loses which search found what.
+
+Comparing the stored **mtime** rather than just the name matters: a re-export
+usually arrives with the same filename, and treating it as already-done would
+silently skip the corrected file.
+
+**Record it only after a successful ingest** (Step 4), never before — a run that
+fails midway must be retried, not marked done:
+
+```python
+seen[os.path.basename(path)] = os.path.getmtime(path)
+with open(marker, "w", encoding="utf-8") as f:
+    json.dump(seen, f, indent=2)
+```
+
+When running interactively and something looks off — the only file present is
+weeks old, or the user says they exported but nothing is new — say what you see
+and ask, rather than guessing.
+
+## Step 2 — Read the export into rows
+
+Build one row per listing from the **raw** columns. Do **not** compute FAR, PSFB
+or PLSF — the gateway derives them.
+
+Do this once per file in `todo`, oldest first.
+
+```python
+import openpyxl
+
+ws = openpyxl.load_workbook(path, data_only=True).active   # `path` = the file from Step 1
 rows = list(ws.iter_rows(values_only=True))
 if len(rows) < 2:
     raise SystemExit("Export has only a header — the saved search returned nothing.")
 
 header = rows[0]
 idx = {name: i for i, name in enumerate(header) if name}
-print(list(idx))   # inspect the real columns before mapping — see the table below
+print(list(idx))          # always inspect the real header before mapping
 
 def cell(r, col):
     i = idx.get(col)
     return r[i] if i is not None else None
 
 def phone_str(v):
-    """Excel hands phone columns back as numbers: 7702998083 (int) or
-    7702998083.0 (float). str() on the float yields '7702998083.0', which is not
-    a phone number. Normalise to digits, then to E.164 so every row stores the
-    same shape."""
+    """Excel returns phone columns as numbers — 7702998083 (int) or
+    7702998083.0 (float). str() on the float gives '7702998083.0', which is not a
+    phone number. Normalise to digits, then E.164, so every row stores one shape."""
     if v is None or str(v).strip() == "":
         return None
     if isinstance(v, float) and v.is_integer():
@@ -136,7 +156,7 @@ def phone_str(v):
         return f"+1{digits}"
     if len(digits) == 11 and digits.startswith("1"):
         return f"+{digits}"
-    return str(v).strip() or None     # unparseable: keep it rather than lose it
+    return str(v).strip() or None      # unparseable: keep it rather than lose it
 
 def split_name(n):
     """'Frank Martone' -> ('Frank', 'Martone'). Suffixes stay on the last name."""
@@ -145,10 +165,9 @@ def split_name(n):
         return (None, None)
     return (parts[0], " ".join(parts[1:])) if len(parts) > 1 else (parts[0], None)
 
-# Find email columns from the REAL header rather than assuming which exist — a
-# layout can be configured to include them, and an email is worth more than a
-# phone (it's the Instantly channel). Never assume they're absent; look.
-EMAIL_COLS = [c for c in idx if "email" in str(c).lower()]
+# Discover email columns from the real header — layouts are configurable, so never
+# assume they're absent. An email outranks a phone: it's the outreach channel.
+EMAIL_COLS   = [c for c in idx if "email" in str(c).lower()]
 BROKER_EMAIL = [c for c in EMAIL_COLS
                 if any(h in str(c).lower() for h in ("sale", "broker", "listing", "agent"))]
 OWNER_EMAIL  = [c for c in EMAIL_COLS if "owner" in str(c).lower()]
@@ -165,11 +184,10 @@ def first_val(r, cols):
 def contact_for(r):
     """The listing broker if the export gives a way to reach one, else the owner.
 
-    Reachable means an email OR a phone — either is enough for the gateway to
-    store the contact and let the property reach Gate 1. One contact per listing:
-    the gateway keys contacts on (property_id, email) with NULLS NOT DISTINCT, so
-    a property can hold only ONE contact that has no email."""
-    sales = cell(r, "Sales Contact")
+    Reachable means an email OR a phone — either is enough. One contact per
+    listing: the gateway keys contacts on (property_id, email) with NULLS NOT
+    DISTINCT, so a property holds only ONE contact that has no email."""
+    sales       = cell(r, "Sales Contact")
     sales_email = first_val(r, BROKER_EMAIL) or first_val(r, OTHER_EMAIL)
     sales_phone = phone_str(cell(r, "Sales Contact Phone"))
     if sales and (sales_email or sales_phone):
@@ -191,8 +209,8 @@ def contact_for(r):
     return None
 
 def clean(d):
-    """ingest's schema is `.optional()`, which accepts a MISSING key but rejects
-    an explicit null. Strip empties instead of passing them through."""
+    """ingest's schema is `.optional()`: it accepts a MISSING key but rejects an
+    explicit null. Strip empties rather than passing them through."""
     return {k: v for k, v in d.items() if v is not None and str(v).strip() != ""}
 
 listings, skipped = [], 0
@@ -203,11 +221,11 @@ for r in rows[1:]:
         "state":          cell(r, "State"),
         "zip":            cell(r, "Zip"),
         "property_type":  cell(r, "Property Type"),    # if the layout carries it
-        "asking_price":   cell(r, "For Sale Price"),   # blank => no-price (flow3)
+        "asking_price":   cell(r, "For Sale Price"),   # blank => no-price listing
         "building_sf":    cell(r, "RBA"),
         "lot_size_acres": cell(r, "Land Area (AC)"),
     })
-    if not l.get("address_raw"):        # the dedup key — a row without it can't be stored
+    if not l.get("address_raw"):        # the dedup key — unusable without it
         skipped += 1
         continue
     c = contact_for(r)
@@ -221,54 +239,47 @@ print(f"{len(listings)} listings, {with_contact} with a contact "
       f"({with_email} of them with an email), {skipped} skipped (no address)")
 ```
 
-**Remember `with_contact`** — Step 6 checks the gateway's `contacts` count against it.
+**Keep `with_contact`** — Step 4 checks the gateway's `contacts` count against it.
 
-Print the header before mapping. Column names vary with the saved layout. If `RBA`
-or `Land Area (AC)` is missing entirely, the **wrong layout** was chosen — almost
-always the pre-defined Industrial rather than the one under SAVED LAYOUTS.
+### The contact columns
 
-**The contact columns are in the export — read them.** The Industrial saved
-layout ships ~39 columns, and the contact block is easy to miss because the
-names don't say "broker". Fill rates below are from one 534-row run (Aug 2026),
-so treat them as a rough guide, not a spec:
+The Industrial saved layout ships ~39 columns and the contact block is easy to
+miss, because none of the names say "broker". Fill rates are from one 534-row run
+(Aug 2026) — a guide, not a spec:
 
-| Column | What it is | Filled in that sample |
+| Column | What it is | Filled |
 |---|---|---|
 | `Sales Contact` | the listing broker's name | ~83% |
 | `Sales Contact Phone` | that broker's phone | ~83% |
-| `Sale Company Contact` | duplicate of `Sales Contact` — ignore it | ~83% |
+| `Sale Company Contact` | duplicate of `Sales Contact` — ignore | ~83% |
 | `True Owner Name` | the owning entity (company / trust) | ~71% |
 | `True Owner Contact` | a person at the owner | ~47% |
 | `True Owner Phone` | the owner's phone | ~66% |
 | `Leasing Company Name` / `Contact` | leasing agent, not the seller — ignore | ~30% |
 
-**An email is worth more than a phone — always check whether the layout has one.**
-That sample had no email column, but that is a fact about one saved layout, not
-about CoStar: layouts are configurable and a different one may well carry email.
-The code above discovers email columns from the header instead of assuming, and
-prefers an email when it finds one. If `email columns found: none in this layout`
-prints on a run where you expected emails, say so — adding an email field to the
-saved layout is the single highest-value change available to this pipeline,
-because email is the Instantly channel.
+**Read these columns. Never go looking elsewhere for something the spreadsheet
+already contains** — including a listing's brochure. A run that ignored this block
+discarded 485 broker phone numbers that were sitting in the file.
 
-`clean()` above is what keeps `ingest` happy: its schema marks fields
-`.optional()`, which accepts a **missing key** but rejects an explicit `null`.
-Never hand-build a listing dict that passes `null` through.
+**Check whether the layout carries email.** That sample had none, but that is a
+fact about one saved layout, not about CoStar. The code discovers email columns
+from the header and prefers an email when it finds one. If it prints
+`email columns found: none in this layout` and you expected otherwise, say so:
+adding an email field to the saved layout is the highest-value change available to
+this pipeline, because email is the outreach channel.
 
-Map the columns exactly as above — `For Sale Price` → `asking_price`, `RBA` →
-`building_sf`, `Land Area (AC)` → `lot_size_acres`. Without RBA **and** acres the
-gateway cannot derive FAR, and the row can't be screened.
+### Mapping notes
 
-**Two schema quirks worth knowing**, because the gateway is strict:
+- `For Sale Price` → `asking_price`, `RBA` → `building_sf`, `Land Area (AC)` →
+  `lot_size_acres`. Without RBA **and** acres the gateway cannot derive FAR and the
+  row can't be screened.
+- If `RBA` or `Land Area (AC)` is missing entirely, the **wrong layout** was used —
+  almost always the pre-defined Industrial instead of the saved one.
 - `adana_screen_costar` takes **`address`**; `adana_ingest_costar_export` takes
-  **`address_raw`**. They are different schemas — map separately for each call.
-- `screen` accepts `null`; `ingest` does **not** — omit a field rather than
-  sending `null` to ingest.
+  **`address_raw`**. Different schemas — map separately for each call.
+- `screen` accepts `null`; `ingest` does **not**. That's what `clean()` is for.
 
-## Step 4 — Screen (gateway derives the ratios)
-
-Call **`adana_screen_costar`** with the rows read from the export (note: `address`,
-not `address_raw`):
+## Step 3 — Screen (the gateway derives the ratios)
 
 ```
 adana_screen_costar(
@@ -277,94 +288,76 @@ adana_screen_costar(
 )
 ```
 
-The gateway derives FAR / PLSF / PSFB from the raw columns and applies the
-land-vs-building bands (FAR < 10% → PLSF < $17; 10–18% → PLSF < $23; > 18% →
-PSFB < $120), dedupes by address+city, and returns `qualifiers`, `near_misses`
-(within 10% of the ceiling), and `no_price`. Present this summary **in chat** —
-name the qualifiers with their FAR band and the metric that cleared, call out
-near-misses, and note how many rows had no price. Don't restate every property.
+The gateway derives FAR / PLSF / PSFB and applies the land-vs-building bands
+(FAR < 10% → PLSF < $17; 10–18% → PLSF < $23; > 18% → PSFB < $120), dedupes by
+address + city, and returns `qualifiers`, `near_misses` (within 10% of the
+ceiling) and `no_price`.
 
-## Step 5 — Contacts (already done in Step 3)
+Present this **in chat**: name the qualifiers with their FAR band and the metric
+that cleared, call out near-misses, note how many rows had no price. Don't restate
+every property.
 
-**The export is the source of contacts. There is no browser work in this step.**
-Step 3's `contact_for()` already pulled the broker (or the owner) out of the
-columns, and the count it printed is what will land.
+## Step 4 — Ingest (persist via gateway)
 
-**The rule is `email || mobile`.** Either one makes the contact real, gets it
-stored, and lets the property reach Gate 1. A listing with neither goes to
-`needs_enrichment`, where `lexisnexis-contact-lookup` picks it up. On one run
-(516 listings, Aug 2026) the sales column covered ~86%, the owner fallback took
-it to **~94%**, and ~6% had no contact detail at all.
-
-**One contact per property.** The gateway keys contacts on `(property_id, email)`
-with NULLS NOT DISTINCT, so a property can hold only one contact that has no
-email. Send the listing broker when there is one, the owner otherwise — don't
-send both, the second is silently dropped.
-
-**A phone-only contact still needs enrichment.** Instantly sends email, so a
-contact with a phone and no email stays `enrichment_status: pending` and stays on
-the LexisNexis work list — that is correct, not a failure to fix. A contact that
-arrived *with* an email is marked `enriched` and drops off that list.
-
-> **Do not open brochures to collect contacts.** This step used to say the
-> layout carried "the listing, not the broker" and sent you to the brochure for
-> each row. That was wrong: the columns above have been in the export all along,
-> and on 2026-08-05 that instruction cost 485 broker phone numbers, which were
-> read from the spreadsheet and discarded. If you think a brochure is needed,
-> re-read the header you printed in Step 3 first.
-
-## Step 6 — Ingest (persist via gateway)
-
-Call **`adana_ingest_costar_export`** with the `listings` list Step 3 built —
-priced and no-price together, contacts already attached:
+Send the `listings` list from Step 2 — priced and no-price together, contacts
+already attached:
 
 ```
 adana_ingest_costar_export(
   gateway_api_key: "${GATEWAY_API_KEY}",
-  location: "<saved search name or location>",
+  location: "<saved search name>",
   listings: [ { address_raw, city, state, zip, property_type, building_sf,
                 lot_size_acres, asking_price,
-                broker: { first_name, last_name, mobile, company, title, contact_type } }, ... ]
+                broker: { first_name, last_name, email, mobile, company, title, contact_type } }, ... ]
 )
 ```
 
-Notes on the `broker` object:
-- **Send whichever of `email` / `mobile` the export gave you** — the gateway
-  stores the contact on either. Omit a field entirely rather than sending `""`
-  or `null`; `clean()` already does this.
-- **`contact_type`** is `broker` or `owner`; `contact_for()` sets it. It defaults
-  to `broker` if omitted, which mislabels an owner row.
-- `source_url` / `brochure_url` / `external_id` are accepted but the layout in
-  use may carry none of them — omit them rather than inventing values.
+On the `broker` object:
+
+- **Send whichever of `email` / `mobile` the export gave you.** The gateway stores
+  a contact on either, and a phone-only broker is a real contact — that is the
+  usual shape from CoStar, not a degraded one. Omit a field rather than sending
+  `""` or `null`.
+- **`contact_type`** is `broker` or `owner`; `contact_for()` sets it. It defaults to
+  `broker`, which mislabels an owner row if omitted.
+- `source_url` / `brochure_url` / `external_id` are accepted, but this layout
+  carries none of them — omit rather than invent.
 
 The gateway UPSERTs properties (dedup on normalized address), records a
-`property_sources` row per listing, UPSERTs the contact on each listing, and sets
-statuses (contactable → `sourced`; no contact → `needs_enrichment`). Relay the
-returned `{run_id, found, new, updated, contacts}`.
+`property_sources` row per listing, UPSERTs the contact, and sets status
+(contactable → `sourced`; no contact → `needs_enrichment`). Relay
+`{run_id, found, new, updated, contacts}`.
 
-**Check `contacts` against `with_contact` from Step 3.** If Step 3 printed
-"485 with a contact" and ingest returns `contacts: 0`, the broker objects didn't
-survive the mapping — stop and fix it rather than reporting a clean run. A silent
-zero here is precisely how 485 contacts were lost once already.
+**Compare `contacts` to `with_contact` from Step 2.** If Step 2 found 485 contacts
+and ingest returns `contacts: 0`, the broker objects didn't survive the mapping —
+stop and fix it rather than reporting a clean run. A silent zero here is exactly
+how 485 contacts were lost once.
 
-## Step 7 — Qualify & write back (the recommendation)
+A contact with a phone but no email keeps `enrichment_status: pending` and stays on
+the enrichment work list. That's correct — outreach needs the email.
 
-Screening (Step 4) only tells you whether the **price** clears the buy-box. The
-recommendation — a graded conviction score, the *why*, and the strategic buy-box
-checklist — is **yours to produce**: you have the full CoStar row, the listing
-and the map, none of which the gateway sees. Build one qualification per property
-you ingested and write it back with **`adana_save_qualification`**:
+**Mark the file processed only now**, using the snippet from Step 1, and only if
+the ingest succeeded. Marking earlier means a run that fails midway is never
+retried — the file looks done and its listings are silently lost.
+
+If more files remain in `todo`, go back to Step 2 with the next one.
+
+## Step 5 — Qualify and write back
+
+Screening only tells you whether the **price** clears the buy-box. The
+recommendation — a graded conviction score, the *why*, and the strategic checklist
+— is **yours**: you have the CoStar row and the map, none of which the gateway
+sees. Score **every** property you ingested, including ones with no contact. That
+judgment is captured now or lost.
 
 ```
 adana_save_qualification(
   gateway_api_key: "${GATEWAY_API_KEY}",
   items: [{
-    address_raw: "<same address you ingested>",    // or property_id
-    score: 1-10,                                     // your conviction, not the screen's 10/0.
-                                                     // REQUIRED — omitting it holds the property.
-                                                     // Score your honest read; don't aim at a cutoff.
+    address_raw: "<same address you ingested>",   // or property_id
+    score: 1-10,                                  // REQUIRED — your conviction, not the screen's 10/0
     action: "PURSUE" | "REVIEW" | "PASS",
-    why: "<one sentence — the deal basis only: property type, acreage, city, FAR band, and the PLSF/PSFB clearance (e.g. 'Laydown Yard on 11.9 ac in Crosby. FAR 10.6% [10-18%] — PLSF $11.86 < $23, clears the buy-box on basis.'). No strategic / submarket / IOS-thesis commentary.>",
+    why: "<one sentence — deal basis only: property type, acreage, city, FAR band, and the PLSF/PSFB clearance. e.g. 'Laydown Yard on 11.9 ac in Crosby. FAR 10.6% [10-18%] — PLSF $11.86 < $23, clears the buy-box on basis.'>",
     checks: [
       { "label": "Significant outdoor storage (stabilized yard)", "pass": true },
       { "label": "Major highway access", "pass": true, "note": "I-10 / SH-146" },
@@ -378,100 +371,82 @@ adana_save_qualification(
 )
 ```
 
-Rules:
-- **Keep the `why` to the deal basis — one sentence.** State property type,
-  acreage, city, the FAR band, and the PLSF/PSFB clearance ("clears the buy-box
-  on basis"). Do **not** append a strategic, submarket, or IOS-thesis sentence —
-  the strategic read belongs in the `checks`, not the prose.
+- **Keep `why` to the deal basis, one sentence.** Property type, acreage, city, FAR
+  band, PLSF/PSFB clearance. The strategic read belongs in `checks`, not the prose.
 - **Reuse the screen's math — never recompute it.** The `screen` block comes
-  straight from the `adana_screen_costar` result for that row (`metric`, `value`,
-  `threshold`, `band` as returned); set `far` to the **decimal** (`far_pct ÷ 100`,
-  so 10.5% → `0.105`). FAR/PLSF/PSFB are the gateway's to compute, not yours.
-- **Don't invent the location checks.** Mark a check `pass: true` only when the
-  CoStar row / listing / map actually supports it; otherwise `pass: false` with a
-  short `note`. A thin or unverifiable criterion is a real signal — fabricating
-  one is worse than leaving it false.
-- **`action` mirrors the screen by default, but you may override it on strategic
-  grounds** — e.g. a price near-miss that's a strong port-adjacent redevelopment
-  play can be `PURSUE` — as long as the `screen` block stays honest. Put the
-  reason for the override in a `checks` note (e.g. on "Redevelopment / vacancy
-  upside"), not in the `why` — the `why` stays basis-only.
-- The gateway stores this verbatim; your overlay **supersedes the gateway's own
-  deterministic screen** on the dashboard card. Batch all rows into one call.
+  straight from the `adana_screen_costar` result; set `far` to the decimal
+  (`far_pct ÷ 100`, so 10.5% → `0.105`).
+- **Don't invent the location checks.** Mark `pass: true` only where the CoStar row
+  or map actually supports it; otherwise `pass: false` with a short note. An
+  unverifiable criterion is a real signal — fabricating one is worse than leaving
+  it false.
+- **`action` mirrors the screen by default**, but you may override on strategic
+  grounds (a price near-miss that's a strong port-adjacent play can be `PURSUE`) as
+  long as the `screen` block stays honest. Put the reason in a `checks` note.
+- Batch all rows into one call.
 
-### Scoring is not promoting — expect `held`
+### Scoring is not promoting
 
-Score **every** property you ingested, including the ones with no contact. You
-are the only reader who will ever have the CoStar row, the listing and the map
-open at once; that judgment is captured now or lost.
-
-But scoring does not move a property into Gate 1. Gate 1 is where a human is
-asked to approve outreach, so a property enters it only when it has a usable
-contact, carries a `score`, and that score is strong enough. Your overlay is
-stored either way and the property keeps its current status. The response carries
+A property reaches Gate 1 — where a human approves outreach — only when it has a
+usable contact, carries a `score`, and that score is strong enough. Your overlay is
+stored either way; the property keeps its current status. The response returns
 `held` (address + reason) and `held_by_reason` (counts).
 
-**A hold is a normal outcome, not an error** — but each reason means something
-different, so read them:
+Holds are normal. Each reason means something different:
 
-- **`no_contact`** — no email and no mobile. Should be *small* now that Step 3
-  maps the contact columns. **A `no_contact` count near your item count means
-  Step 3's contact mapping didn't work**; go back and fix it rather than
-  accepting the holds. `lexisnexis-contact-lookup` resolves the rest.
-- **`no_score`** — always your bug. Omitting the score holds the property rather
-  than letting it through. Send a score for every item.
-- **`below_score`** — your conviction score was too low to put in front of a
-  human. The system working, not a problem to route around.
+- **`no_contact`** — no email and no mobile. Should be *small* once Step 2 maps the
+  contact columns. **A `no_contact` count near your item count means the contact
+  mapping didn't work** — go back and fix it rather than accepting the holds.
+- **`no_score`** — always your bug. Omitting the score holds the property; it does
+  not slip past.
+- **`below_score`** — the conviction score was too low to put in front of a human.
+  The system working.
 
-**Score to your honest read of the property, and do not try to reverse-engineer
-the cutoff.** The gateway's threshold is deliberately not published in this skill
-or in the tool schema, precisely so the score stays a *measurement* rather than a
-target to clear. A score chosen to get a property through Gate 1 is worthless —
-it destroys the one signal standing between a weak listing and someone's time.
-Expect a substantial share of any run to be held; on 2026-08-05 every one of 174
-properties that reached the approval queue had all five IOS checks false and
-satisfied only "price is $1–10M".
-
-Never try to work around a hold — the `pipeline_status` override is gated too,
-and attempting one just misreports the pipeline.
+**Score your honest read, and don't reverse-engineer the cutoff.** The threshold is
+deliberately not published here or in the tool schema, so the score stays a
+*measurement* rather than a target. A score chosen to get a property through is
+worthless — it destroys the one signal standing between a weak listing and
+someone's time. Expect a substantial share of any run to be held.
 
 ## Reporting back
 
-Tight summary: qualifier count + names, near-misses, no-price count, the ingest
-counts (`new` / `updated` / **`contacts`**), and how many properties you scored
-(`saved`).
+Qualifier count and names, near-misses, no-price count, ingest counts
+(`new` / `updated` / `contacts`), and the qualification outcome.
 
-**Always report three numbers that are easy to conflate:**
+Three numbers that are easy to conflate — report them separately:
 
-- **`contacts`** — how many listings landed with a contact. Compare it to
-  `with_contact` from Step 3; they should match.
-- **`qualified` and `held` separately, never just `saved`.** `saved` is overlays
-  stored; `qualified` is how many actually reached Gate 1. Break the holds down
-  by reason from `held_by_reason`, e.g. *"scored 181 — 32 in Gate 1; 142 held on
-  conviction score, 7 awaiting a contact."* Reporting `saved` alone implies a
-  Gate 1 queue that does not exist.
-
-Also say **how many contacts still lack an email** (Step 3 printed this as
-`with_email`). Instantly sends email, so every phone-only contact remains on the
-LexisNexis work list until one is found — and if the layout carried no email
-column at all, mention that adding one would remove most of that work.
+- **`contacts`** — listings that landed with a contact. Should match `with_contact`.
+- **`qualified` vs `saved`** — `saved` is overlays stored; `qualified` is how many
+  reached Gate 1. Break holds down by reason: *"scored 181 — 32 in Gate 1; 142 held
+  on conviction score, 7 awaiting a contact."*
+- **`with_email`** — how many contacts still lack an email, and so remain on the
+  enrichment work list. If the layout carried no email column, say that adding one
+  would remove most of that work.
 
 ## Edge cases
 
 - **Zero qualifiers**: say so plainly and surface the near-misses.
-- **Export has only a header**: the saved search returned nothing — re-check that
-  the right search was opened, rather than reporting "0 properties" as a result.
-- **No `CostarExport*.xlsx` in the folder**: the browser's download location isn't
-  pointing at `exports/`. Stop and have the user re-run
-  `/adana-dsa:adana-setup` Step 5. **Do not fall back to reading the grid** — it
-  will not finish.
-- **Expected column missing** (e.g. no `RBA`): the wrong layout was chosen —
-  almost always the *pre-defined* Industrial rather than the one under **SAVED
-  LAYOUTS**. Re-export with the saved layout.
-- **A save dialog appears instead of a download**: the browser's "Ask where to
-  save each file" is on. That's a native OS dialog and cannot be clicked from
-  here — stop and have the user switch it off.
+- **Export has only a header**: the saved search returned nothing. Ask the user to
+  confirm they opened the search they meant.
+- **Nothing new to process**: the normal outcome on a scheduled run in a week
+  nobody exported. Say so and stop. Never reprocess an already-marked file to have
+  something to report.
+- **No `CostarExport*.xlsx` at all**: nothing has ever been placed in `exports/`,
+  or downloads are landing in their normal Downloads folder. Give them the Step 1
+  recipe.
+- **Several new exports at once**: process them oldest-first, one at a time, each
+  with its own `location`. Merging them loses which search found what.
+- **A re-export with the same filename**: the mtime comparison catches it, so it
+  is treated as new. That is deliberate — a corrected re-export must not be
+  skipped just because the name matches.
+- **`.processed.json` missing or deleted**: every file looks new. Don't blindly
+  reprocess the whole folder — say what you see and confirm before ingesting a
+  backlog, since re-ingesting old exports re-dates properties that haven't
+  actually been re-listed.
+- **Expected column missing** (`RBA`, `Sales Contact`): the wrong layout. Ask for a
+  re-export; don't work around it, since the missing columns carry price, size and
+  contacts.
+- **Several exports at once** (multiple saved searches): process one at a time,
+  each with its own `location`. Merging them loses which search found what.
 - **Gateway key rejected**: stop and ask the user to re-run
   `/adana-dsa:adana-setup` with a valid `adana_live_…` key.
-- **Logged out**: if CoStar shows a sign-in page, stop and ask the user to sign
-  in — never enter credentials.
