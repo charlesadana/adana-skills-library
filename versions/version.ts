@@ -1,5 +1,5 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.7.0';
+const DEFAULT_VERSION = 'v0.8.0';
 const DEFAULT_DATE = 'Aug 7, 2026';
 
 // Export constants initially with default values
@@ -9,6 +9,21 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.8.0',
+    date: 'Aug 7, 2026',
+    changes: [
+      'costar-saved-search Step 2 now maps 14 more columns. The Industrial layout ships 39 and the skill mapped 8; the other 31 were read out of the spreadsheet and discarded on every run. Newly captured: latitude/longitude, submarket, market, days_on_market, year_built, tenancy, percent_leased, parking_ratio, last_sale_date, last_sale_price, cap_rate, plus a source_attributes catch-all for what the layout carries that nothing reads yet.',
+      'Fixed the mapping bug that had been emptying property_type for months: the skill mapped `Property Type`, and this layout has no such column — it is `Secondary Type`. Every row returned None, leaving 1,300 of 1,760 stored properties untyped. The value now feeds the scoring rubric, so a null here costs a real component of the score, and Step 2 prints a fill count so the next occurrence is caught in the run rather than months later.',
+      'New `excel_date()` helper alongside `phone_str()`, for the same reason that one exists: `Last Sale Date` arrives as an Excel serial (41716 is 2014-03-18, not the year 41716), and sending it raw writes a five-digit integer into a date column. Handles the datetime shape too, since openpyxl converts only when the cell format tells it to.',
+      'The column documentation went from the contact block alone to all 39 columns with measured fill rates. That omission is why the discarded 31 stayed invisible — a reader of the skill had no way to know latitude and longitude existed, let alone that they were 100% filled while the design doc listed transport proximity as blocked for want of geo data.',
+      'Five data formats that silently produce wrong values are recorded in Mapping notes: the Excel serial above; `Cap Rate` and `Percent Leased` being percentage POINTS rather than fractions (8 means 8%); `Rent/SF/Yr` being a range string ("$11.78 - 14.39 (Est.)") that must not be coerced; `True Owner City State Zip` being one combined field; and `Sale Company Contact` duplicating `Sales Contact` rather than being a second person.',
+      'Step 5 now publishes the scoring rubric. The score had no definition anywhere — the tool asked for "your conviction, 1-10" and no rubric existed in either repo, so a rule got invented and applied to 684 properties without anyone specifying it, on a scale where 8, 9 and 10 were arithmetically unreachable. It is now computed: 62.5% price against Charles\'s ceiling, 18.75% coverage on Charles\'s FAR bands, 12.5% site size, 6.25% asset type, with both worked examples from real properties.',
+      'The skill now separates what is computed from what is judged. The score is arithmetic and the same property scores the same every run; the `checks` and `why` remain the agent\'s read of the site. The four component points go into `screen` alongside the FAR maths — not bookkeeping, but because an LLM computing a four-term weighted average across forty properties will slip, and recording the components makes a slip visible instead of silent.',
+      'Removed the "score your honest read, and don\'t reverse-engineer the cutoff" guidance. It was right when the number was a judgment and is meaningless now that it is a formula with no discretion in it — left in place it would have contradicted the rubric on the same page. Replaced with: compute it, don\'t aim it, and if a property feels better than its score then that belongs in `checks` where a human will read it.',
+      'Also documented that `Land Area (AC)` is GROSS acreage. The market underwrites IOS on usable acres, which CoStar does not publish and which comes from survey and zoning at diligence — screening on gross is what everyone does at this stage, but it should not be reported as usable.',
+    ],
+  },
   {
     version: 'v0.7.0',
     date: 'Aug 7, 2026',

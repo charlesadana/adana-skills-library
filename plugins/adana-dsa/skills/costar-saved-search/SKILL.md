@@ -128,7 +128,7 @@ or PLSF — the gateway derives them.
 Do this once per file in `todo`, oldest first.
 
 ```python
-import openpyxl
+import datetime, openpyxl
 
 ws = openpyxl.load_workbook(path, data_only=True).active   # `path` = the file from Step 1
 rows = list(ws.iter_rows(values_only=True))
@@ -164,6 +164,33 @@ def split_name(n):
     if not parts:
         return (None, None)
     return (parts[0], " ".join(parts[1:])) if len(parts) > 1 else (parts[0], None)
+
+def excel_date(v):
+    """CoStar ships `Last Sale Date` as an Excel serial, not a date: 41716 is
+    2014-03-18. Sending the raw number stores a five-digit integer in a date
+    column. openpyxl usually converts it for you, but not always — depends on the
+    cell's number format — so handle both shapes."""
+    if v is None or str(v).strip() == "":
+        return None
+    if isinstance(v, datetime.datetime):
+        return v.date().isoformat()
+    if isinstance(v, datetime.date):
+        return v.isoformat()
+    try:
+        serial = int(float(v))
+    except (TypeError, ValueError):
+        return None
+    # Excel's epoch is 1899-12-30 (the 1900 leap-year bug is baked in).
+    return (datetime.date(1899, 12, 30) + datetime.timedelta(days=serial)).isoformat()
+
+def num(v):
+    """A numeric cell, or None. Blanks arrive as '' or None depending on the cell."""
+    if v is None or str(v).strip() == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 # Discover email columns from the real header — layouts are configurable, so never
 # assume they're absent. An email outranks a phone: it's the outreach channel.
@@ -213,6 +240,12 @@ def clean(d):
     explicit null. Strip empties rather than passing them through."""
     return {k: v for k, v in d.items() if v is not None and str(v).strip() != ""}
 
+# Columns the layout carries that nothing reads yet. Kept verbatim rather than
+# dropped — this whole mapping exists because 31 of 39 columns were being read
+# out of the file and thrown away on every run.
+KEEP_RAW = ["Submarket Cluster", "For Sale Status", "Rent/SF/Yr",
+            "Total Available Space (SF)", "Property Name", "Year Renovated"]
+
 listings, skipped = [], 0
 for r in rows[1:]:
     l = clean({
@@ -220,14 +253,32 @@ for r in rows[1:]:
         "city":           cell(r, "City"),
         "state":          cell(r, "State"),
         "zip":            cell(r, "Zip"),
-        "property_type":  cell(r, "Property Type"),    # if the layout carries it
+        "property_type":  cell(r, "Secondary Type"),   # NOT "Property Type" — see below
         "asking_price":   cell(r, "For Sale Price"),   # blank => no-price listing
         "building_sf":    cell(r, "RBA"),
         "lot_size_acres": cell(r, "Land Area (AC)"),
+
+        # CoStar detail. lat/long are what make transport-proximity checks
+        # possible at all — they were in every export and captured by nothing.
+        "latitude":        num(cell(r, "Latitude")),
+        "longitude":       num(cell(r, "Longitude")),
+        "submarket":       cell(r, "Submarket Name"),
+        "market":          cell(r, "Market Name"),
+        "days_on_market":  num(cell(r, "Days On Market")),
+        "year_built":      num(cell(r, "Year Built")),
+        "tenancy":         cell(r, "Tenancy"),
+        "percent_leased":  num(cell(r, "Percent Leased")),   # 100 == 100%
+        "parking_ratio":   num(cell(r, "Parking Ratio")),
+        "last_sale_date":  excel_date(cell(r, "Last Sale Date")),
+        "last_sale_price": num(cell(r, "Last Sale Price")),
+        "cap_rate":        num(cell(r, "Cap Rate")),         # 8 == 8%
     })
     if not l.get("address_raw"):        # the dedup key — unusable without it
         skipped += 1
         continue
+    raw = clean({k: cell(r, k) for k in KEEP_RAW})
+    if raw:
+        l["source_attributes"] = raw
     c = contact_for(r)
     if c:
         l["broker"] = clean(c)
@@ -235,17 +286,59 @@ for r in rows[1:]:
 
 with_contact = sum(1 for l in listings if l.get("broker"))
 with_email   = sum(1 for l in listings if l.get("broker", {}).get("email"))
+with_geo     = sum(1 for l in listings if l.get("latitude") is not None)
+with_type    = sum(1 for l in listings if l.get("property_type"))
 print(f"{len(listings)} listings, {with_contact} with a contact "
       f"({with_email} of them with an email), {skipped} skipped (no address)")
+print(f"geo on {with_geo}, type on {with_type} — both should be near 100% and ~89%")
 ```
+
+**Check those last two numbers.** `with_geo` near zero means the `Latitude` /
+`Longitude` columns are absent, which is the wrong layout. `with_type` near zero
+means the header calls the column something other than `Secondary Type` — read
+the printed header and map what is actually there rather than shipping nulls.
 
 **Keep `with_contact`** — Step 4 checks the gateway's `contacts` count against it.
 
+### What the layout actually contains
+
+**All 39 columns, with fill rates** measured across three real exports (489 / 25 /
+20 rows, Aug 2026 — a guide, not a spec). This table exists because for months
+the skill documented only the contact block, and **31 of the 39 columns were read
+out of the spreadsheet and discarded on every single run** — including latitude
+and longitude, which the design doc simultaneously listed as blocking the
+transport-proximity work for want of geo data.
+
+| Column | Fill | Mapped to |
+|---|---|---|
+| `Property Address` | 100% | `address_raw` — the dedup key |
+| `City` / `State` / `Zip` | 100% | as-is |
+| `RBA` | 100% | `building_sf` |
+| `Land Area (AC)` | 100% | `lot_size_acres` — **gross, not usable** |
+| `For Sale Price` | 62% | `asking_price`; blank ⇒ no-price listing (flow3) |
+| `Latitude` / `Longitude` | 100% | `latitude` / `longitude` |
+| `Secondary Type` | 89% | `property_type` — **not** `Property Type` |
+| `Submarket Name` | 100% | `submarket` |
+| `Market Name` | 100% | `market` |
+| `Days On Market` | 100% | `days_on_market` — 1–709 days, 296 distinct |
+| `Year Built` | 100% | `year_built` |
+| `Tenancy` | 92% | `tenancy` — Single / Multi |
+| `Percent Leased` | 85% | `percent_leased` — points, 100 = 100% |
+| `Parking Ratio` | 77% | `parking_ratio` |
+| `Last Sale Date` | 56% | `last_sale_date` — **Excel serial**, convert |
+| `Last Sale Price` | 49% | `last_sale_price` |
+| `Cap Rate` | 11% | `cap_rate` — points, 8 = 8% |
+| `Submarket Cluster`, `For Sale Status`, `Rent/SF/Yr`, `Total Available Space (SF)`, `Property Name`, `Year Renovated` | varies | `source_attributes` verbatim |
+| the contact block | see below | `broker{}` |
+
+**`Land Area (AC)` is gross acreage.** The market underwrites IOS on *usable*
+acres, which CoStar does not publish — it comes from survey, zoning setbacks and
+wetlands during diligence. Screening on gross is what everyone does at this
+stage; just don't report it as usable.
+
 ### The contact columns
 
-The Industrial saved layout ships ~39 columns and the contact block is easy to
-miss, because none of the names say "broker". Fill rates are from one 534-row run
-(Aug 2026) — a guide, not a spec:
+The contact block is easy to miss, because none of the names say "broker":
 
 | Column | What it is | Filled |
 |---|---|---|
@@ -278,6 +371,30 @@ this pipeline, because email is the outreach channel.
 - `adana_screen_costar` takes **`address`**; `adana_ingest_costar_export` takes
   **`address_raw`**. Different schemas — map separately for each call.
 - `screen` accepts `null`; `ingest` does **not**. That's what `clean()` is for.
+
+**Five formats that will silently produce wrong data if you take the cell at face
+value.** Each was verified against real exports:
+
+1. **`Last Sale Date` is an Excel serial** — `41716` is 2014-03-18, not the year
+   41716. Values span 1996–2026. `excel_date()` handles it; sending the raw
+   number writes a five-digit integer into a date column.
+2. **`Cap Rate` and `Percent Leased` are percentage points**, not fractions. `8`
+   means 8%; `100` means 100%. Do not divide by 100 — the columns are documented
+   as points on the gateway side too.
+3. **`Rent/SF/Yr` is a range string**, not a number — `"$11.78 - 14.39 (Est.)"`.
+   It goes to `source_attributes` as text. Never coerce it.
+4. **`True Owner City State Zip` is one combined field** —
+   `"Lilburn, GA 30047-3497"`. Split it only if you need the parts.
+5. **`Sale Company Contact` duplicates `Sales Contact`** (identical fill, 412/489).
+   Ignore it; it is not a second person.
+
+**The `Property Type` trap.** This layout has **`Secondary Type`**, and no column
+named `Property Type` at all. Mapping the latter returned `None` on every row for
+months, leaving 1,300 of 1,760 stored properties with no type and an index on
+`(state, property_type)` that could never be used. The values are `Warehouse`,
+`Manufacturing`, `Distribution`, `Truck Terminal`, `Service`, `Showroom`,
+`Refrigeration/Cold Storage` and similar — and the scoring rubric in Step 5 reads
+them, so a null here costs a real component of the score.
 
 ## Step 3 — Screen (the gateway derives the ratios)
 
@@ -386,10 +503,18 @@ If more files remain in `todo`, go back to Step 2 with the next one.
 
 ## Step 5 — Qualify and write back
 
-Screening only tells you whether the **price** clears the buy-box. The
-recommendation — a graded conviction score, the *why*, and the strategic checklist
-— is **yours**: you have the CoStar row and the map, none of which the gateway
-sees.
+Two different things happen here, and conflating them is what went wrong before:
+
+- **The `score` is COMPUTED** from the rubric below. It is arithmetic on data you
+  already have. The same property scores the same every run, by anyone.
+- **The `checks` and the `why` are YOURS** — the strategic read of the site, from
+  the CoStar row and the map, which the gateway cannot see.
+
+The score used to be described only as "your conviction, 1–10", with no rubric
+anywhere. What happened is instructive: a consistent rule got invented and applied
+to 684 properties without anyone specifying it, and under that rule 8, 9 and 10
+were arithmetically unreachable — a ten-point scale that only ever produced three
+to seven. The rubric replaces guesswork with a stated calculation.
 
 ### Ask the gateway what needs scoring — do not work from memory
 
@@ -412,6 +537,94 @@ question you ask the gateway, not a list you keep in your head.
 
 It also survives a session ending mid-batch, which the old approach did not.
 
+### The scoring rubric
+
+**Step A — the ceiling comes from the screen you already ran.** Charles's bands,
+unchanged:
+
+| FAR | Metric | Ceiling |
+|---|---|---|
+| <10% | PLSF | $17 |
+| 10–18% | PLSF | $23 |
+| >18% | PSFB | $120 |
+
+Anything at or above its ceiling failed the screen and was disqualified at ingest,
+so it will never appear in your work list.
+
+**Step B — four component scores.**
+
+**Basis — 62.5%.** `ratio = value ÷ ceiling`, straight from the `screen` block.
+
+| % of ceiling | Pts | | % of ceiling | Pts |
+|---|---|---|---|---|
+| 0–10 | 10 | | 50–60 | 5 |
+| 10–20 | 9 | | 60–70 | 4 |
+| 20–30 | 8 | | 70–80 | 3 |
+| 30–40 | 7 | | 80–90 | 2 |
+| 40–50 | 6 | | 90–100 | 1 |
+
+**Coverage — 18.75%.** Charles's three bands.
+
+| FAR | Pts |
+|---|---|
+| <10% | 10 |
+| 10–18% | 6 |
+| >18% | 2 |
+
+**Size — 12.5%.** `lot_size_acres`.
+
+| Acres | Pts | | Acres | Pts |
+|---|---|---|---|---|
+| ≥10 | 10 | | 2–3 | 5 |
+| 5–10 | 9 | | 1–2 | 3 |
+| 3–5 | 7 | | <1 | 1 |
+
+**Type — 6.25%.** `property_type`, from `Secondary Type`.
+
+| Value | Pts |
+|---|---|
+| Truck Terminal, Distribution | 10 |
+| Warehouse, Manufacturing, Service | 7 |
+| Showroom, Freestanding, Food Processing | 4 |
+| Data Center, Supermarket, Refrigeration/Cold Storage | 1 |
+| unknown / missing | 5 |
+
+**Step C — blend and round.**
+
+```
+score = round( 0.625×Basis + 0.1875×Coverage + 0.125×Size + 0.0625×Type )
+```
+
+**Worked, from real properties:**
+
+> **224 Zander Ln** — FAR 2.8%, 9.0 ac, PLSF $3.66 against $17.
+> ratio 0.215 → Basis **8** · Coverage **10** · Size **9** · Type **5** (unknown)
+> `5.00 + 1.88 + 1.13 + 0.31 = 8.31` → **score 8**
+
+> **12128 Zion Rd** — FAR 4.5%, 2.5 ac, PLSF $10.68 against $17, Warehouse.
+> ratio 0.628 → Basis **4** · Coverage **10** · Size **5** · Type **7**
+> `2.50 + 1.88 + 0.63 + 0.44 = 5.44` → **score 5**
+
+Note the second one: cheap enough to pass the screen comfortably, but a small
+site pulls it down. That is the rubric doing its job — price alone was never the
+whole question.
+
+### Show your working
+
+**Put the four component points in the `screen` block** alongside the FAR math:
+
+```
+screen: {
+  far: 0.028, metric: "PLSF", value: 3.66, threshold: 17, band: "<10%", pass: true,
+  basis_pts: 8, coverage_pts: 10, size_pts: 9, type_pts: 5
+}
+```
+
+This is not bookkeeping. You are computing a four-term weighted average across
+dozens of properties in one pass, and arithmetic slips are easy and invisible.
+Recording the components makes the total checkable and a wrong score obvious
+rather than silent.
+
 ### No-price listings get NO score
 
 A `source_variant` of `costar_no_price` means there is no asking price. Every
@@ -430,7 +643,7 @@ adana_save_qualification(
   gateway_api_key: "${GATEWAY_API_KEY}",
   items: [{
     address_raw: "<same address you ingested>",   // or property_id
-    score: 1-10,                                  // REQUIRED — your conviction, not the screen's 10/0
+    score: 1-10,                                  // REQUIRED — COMPUTED from the rubric above
     action: "PURSUE" | "REVIEW" | "PASS",
     why: "<one sentence — deal basis only: property type, acreage, city, FAR band, and the PLSF/PSFB clearance. e.g. 'Laydown Yard on 11.9 ac in Crosby. FAR 10.6% [10-18%] — PLSF $11.86 < $23, clears the buy-box on basis.'>",
     checks: [
@@ -441,23 +654,25 @@ adana_save_qualification(
       { "label": "Near Class I railyard", "pass": true, "note": "UP ~6 mi" },
       { "label": "Redevelopment / vacancy upside", "pass": false }
     ],
-    screen: { far: 0.105, metric: "PLSF", value: 13.8, threshold: 23, band: "10-18%", pass: true }
+    screen: { far: 0.105, metric: "PLSF", value: 13.8, threshold: 23, band: "10-18%", pass: true,
+              basis_pts: 5, coverage_pts: 6, size_pts: 10, type_pts: 7 }
   }, ... ]
 )
 ```
 
 - **Keep `why` to the deal basis, one sentence.** Property type, acreage, city, FAR
   band, PLSF/PSFB clearance. The strategic read belongs in `checks`, not the prose.
-- **Reuse the screen's math — never recompute it.** The `screen` block comes
+- **Reuse the screen's math — never recompute it.** The FAR/PLSF/PSFB block comes
   straight from the `adana_screen_costar` result; set `far` to the decimal
-  (`far_pct ÷ 100`, so 10.5% → `0.105`).
+  (`far_pct ÷ 100`, so 10.5% → `0.105`). Add the four rubric component points
+  alongside it.
 - **Don't invent the location checks.** Mark `pass: true` only where the CoStar row
   or map actually supports it; otherwise `pass: false` with a short note. An
   unverifiable criterion is a real signal — fabricating one is worse than leaving
   it false.
-- **`action` mirrors the screen by default**, but you may override on strategic
-  grounds (a price near-miss that's a strong port-adjacent play can be `PURSUE`) as
-  long as the `screen` block stays honest. Put the reason in a `checks` note.
+- **`action` is your read, and it is separate from the score.** `PURSUE` when you
+  would actually work this property; `REVIEW` when it clears the screen but you
+  have a reason to hold. The score is arithmetic; the action is judgment.
 - Batch all rows into one call.
 
 ### Scoring is not promoting
@@ -484,11 +699,12 @@ floor, "find a contact" is not the fix that comes first — the lookup would not
 spent either way, so the score is reported as the reason instead. A `no_contact`
 hold therefore only ever appears on a property genuinely worth the credit.
 
-**Score your honest read, and don't reverse-engineer the cutoff.** The threshold is
-deliberately not published here or in the tool schema, so the score stays a
-*measurement* rather than a target. A score chosen to get a property through is
-worthless — it destroys the one signal standing between a weak listing and
-someone's time. Expect a substantial share of any run to be held.
+**Compute the score; don't aim it.** The rubric is arithmetic, so there is nothing
+to reverse-engineer and no discretion to exercise — a property scores what the
+formula says, and the cutoff is the gateway's business. Expect a substantial share
+of any run to be held; that is the filter working, not a problem to solve by
+nudging a component up. If a property feels better than its score, that belongs in
+`checks` and `why`, where a human will read it.
 
 ## Reporting back
 

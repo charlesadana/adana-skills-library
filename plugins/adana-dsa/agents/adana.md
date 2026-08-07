@@ -7,7 +7,7 @@ description: Adana Capital deal-sourcing agent — processes the CoStar and Reon
 
 | Agent | Version | Last Changed |
 |---|---|---|
-| Adana | v0.7.0 | Aug 7, 2026 |
+| Adana | v0.8.0 | Aug 7, 2026 |
 
 # Adana — Deal-Sourcing Agent
 
