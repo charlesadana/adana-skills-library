@@ -4,13 +4,13 @@ description: >-
   Process a Reonomy saved-search export for Adana off-market deal sourcing: read
   the CSV the user exported into the project folder, map each property's owner and
   address, persist them through the Adana gateway as off-market leads (flow2), and
-  write back a qualification: a rubric-computed score plus the strategic read. The user runs the Reonomy export
+  write back the strategic read (no score — unpriced leads are gated on site shape). The user runs the Reonomy export
   themselves; this skill takes over from the file. Use this whenever the user names
   a Reonomy saved search or asks to "pull Reonomy", "run the off-market search",
   "get owners for [area]", or says they've dropped a Reonomy export in.
 allowed-tools: mcp__gateway__adana_ingest_reonomy mcp__gateway__adana_save_qualification
 area: Collection
-use_for: "Process a Reonomy export the user has placed in the project folder: persist deduped off-market properties + owner contact shells (flow2), and write back a qualification: a rubric-computed score plus the strategic read."
+use_for: "Process a Reonomy export the user has placed in the project folder: persist deduped off-market properties + owner contact shells (flow2), which the gateway triages on site shape at ingest, then write back the strategic read — action, why and checks, with NO score."
 deps:
   mcp: []
   gateway: ["adana_ingest_reonomy", "adana_save_qualification"]
@@ -142,13 +142,19 @@ adana_ingest_reonomy(
 ```
 
 The gateway UPSERTs properties (dedup on normalized address), records a
-`property_sources` row, creates an **owner contact shell**, and sets new properties
-to **`sourced`** — kept, and waiting for your read. Relay
-`{run_id, found, new, updated}`.
+`property_sources` row, creates an **owner contact shell**, and — since gateway
+v2.9.0 — **triages each new lead on site shape**. Relay
+`{run_id, found, new, updated, queued}`.
 
-They do **not** land on the enrichment work list directly. That list is a queue a
-property earns by being scored, so Step 4 is what puts these in line for a lookup;
-skip it and they sit parked indefinitely.
+**`queued` is the number that matters.** FAR and acreage decide it: a promising
+shape (HIGH/MED) lands straight in `needs_enrichment`, the queue where a lookup
+gets spent; everything else waits in `sourced` for a human read. This is the same
+door, with the same tiers, that a no-price CoStar listing already used.
+
+**`queued: 0` on a real export is worth saying out loud.** It means no lead in the
+file had both the acreage and the coverage to clear the bar — often because the
+export carried no `building_sf`, without which FAR cannot be derived and every row
+falls to LOW. Check the header before concluding the search was bad.
 
 **Mark the file processed now**, using the snippet from Step 1, and only if the
 ingest succeeded. If more files remain in `todo`, return to Step 2 with the next
@@ -156,66 +162,45 @@ one — each with its own `location`.
 
 ## Step 4 — Qualify and write back
 
-Off-market leads usually have **no list price**, so the FAR/PLSF/PSFB screen can't
-run and the Basis component — 62.5% of the CoStar score — has nothing to work
-with.
+Off-market leads have **no list price**, so the FAR/PLSF/PSFB screen cannot run
+and there is no score to send. **Do not compute one.**
 
-**Score them anyway, and do not import CoStar's rule.** `costar-saved-search` says
-a listing with no price gets no score, and that rule is right *there* and wrong
-here. The difference is what the gateway does at ingest:
+### Why there is no Reonomy score
 
-| | CoStar no-price | Reonomy off-market |
+Every buy-box measure divides by price. What is computable without one is the
+*shape* of the site — FAR and acreage — and the gateway measured exactly how good
+a signal that is: against 1,150 priced properties where the answer is known, the
+best shape segment clears the Gate 1 floor 46.7% of the time against a 19.2% base
+rate. That is a real 2.4x lift, worth ordering work by, and nowhere near precise
+enough to put on the same 1–10 scale the price screen produces. Putting a coin
+flip into `score` makes the gateway's floor compare a measurement against a guess.
+
+So shape is used as **shape**, not laundered into a number:
+
+| | Priced (CoStar flow1) | Unpriced (Reonomy, CoStar no-price) |
 |---|---|---|
-| Landed as | triaged on site shape at ingest | `sourced`, no triage at all |
-| Route to enrichment | already routed, on shape | **only** by clearing the score floor |
-| So a score is | an invented number, graded against measured ones | the sole door out of `sourced` |
+| Gate | the computed score, against the floor | the shape tier, decided at ingest |
+| You send | `score` + `action` + `why` + `checks` | `action` + `why` + `checks`, **no score** |
+| Held as | `no_score` / `below_score` | `below_shape` |
 
-Skip a Reonomy lead for want of a price and it sits in `sourced` for ever — no
-lookup, no outreach, nothing. That is the failure this step exists to prevent.
+**Gateway v2.9.0 does the triage for you at ingest** — HIGH/MED land in
+`needs_enrichment`, everything else waits in `sourced`. `adana_ingest_reonomy`
+returns `queued` with the count. Nothing here needs a number from you, and a score
+sent anyway is ignored rather than graded on.
 
-### The price-free rubric
-
-Use the **same component tables and the same weights** as
-`costar-saved-search` — Coverage 0.1875, Size 0.125, Type 0.0625 — but over only
-the components you can actually compute, renormalised so the result is still on a
-1–10 scale:
-
-```
-score = round( Σ(weightᵢ × ptsᵢ) ÷ Σ(weightᵢ) )   over computable components only
-```
-
-Same boundary convention: lower bound inclusive, upper exclusive.
-
-- **Coverage** needs `building_sf` **and** `lot_size_acres` to derive FAR. Reonomy
-  carries them only sometimes; drop the component when it can't be derived rather
-  than guessing at one.
-- **Size** is `lot_size_acres`.
-- **Type** is `property_type`, with the same "unknown → 5" fallback.
-
-> **Owner-held 6.2 ac, 41,000 SF building, Warehouse.** FAR = 41,000 ÷ (6.2 ×
-> 43,560) = 15.2% → the 10–18% band → Coverage **6**. 6.2 ac → Size **9**.
-> Warehouse → Type **7**.
-> `(1.125 + 1.125 + 0.4375) ÷ 0.375 = 2.6875 ÷ 0.375 = 7.17` → **score 7**
-
-> **Same site, no building SF in the export.** Coverage drops out.
-> `(0.125×9 + 0.0625×7) ÷ 0.1875 = 1.5625 ÷ 0.1875 = 8.33` → **score 8**
-
-**Those two numbers are the thing to be honest about.** Dropping a component
-renormalises the rest upward, so a thinner export scores *higher* on the same
-site. Say so when you report a run, and prefer a re-export carrying `building_sf`
-over accepting the inflated read.
-
-**If you can compute nothing** — no acreage and no type — you have no basis for a
-number. Send the qualification **without a score** and say so: it will come back
-`no_score`, which is the truthful outcome. A fabricated score is graded against
-the same floor as a computed one with nothing to tell them apart.
+An earlier version of this skill did derive a score from coverage, size and type
+with the price component dropped and the rest renormalised. It is gone. It scored
+a **thinner export higher than a fuller one** — losing `building_sf` removed the
+coverage term and pushed the remaining weights up — and it cleared a floor of 8
+more easily than a sound priced warehouse could. That is the failure mode the
+gateway's own triage module had warned about in writing before it was written.
 
 ```
 adana_save_qualification(
   gateway_api_key: "${GATEWAY_API_KEY}",
   items: [{
     address_raw: "<same address you ingested>",     // or property_id
-    score: 7,                                       // REQUIRED — COMPUTED from the rubric above
+                                                    // NO `score` — see above
     action: "PURSUE" | "REVIEW" | "PASS",
     why: "<one short paragraph — owner/asset/location fit, and that pricing is TBD>",
     checks: [ { "label": "Significant outdoor storage (stabilized yard)", "pass": true, "note": "<acres>" }, ... ]
@@ -223,10 +208,10 @@ adana_save_qualification(
 )
 ```
 
-**Omit the `screen` block when there's no price** — there is no FAR/PLSF/PSFB
-result to put in it, and no `basis_pts`. Record the components you *did* compute
-in the `why` instead (`"Coverage 6 · Size 9 · Type 7 → 7"`), so a total that looks
-wrong later can be checked rather than merely doubted.
+**Omit `score` and omit the `screen` block.** There is no price, so there is no
+FAR/PLSF/PSFB result and no component points. Sending a score here does not help:
+the gateway ignores it on an unpriced property and gates on shape regardless. Your
+work is the `why` and the `checks`.
 
 Same honesty rule as CoStar: assert a location check only where the Reonomy record
 or the map supports it. Pricing is unknown, so most off-market leads land `REVIEW`
@@ -237,32 +222,34 @@ or the map supports it. Pricing is unknown, so most off-market leads land `REVIE
 shell has no email, and the gateway never promotes a property to `qualified`
 without one — outreach runs on email.
 
-- **`no_contact`** — the score cleared the bar, so the property is now **queued
-  for enrichment**. This is the good outcome: once a lookup supplies the address
-  it goes straight into Gate 1, with no second read needed from you.
-- **`below_score`** — it did not clear the bar, so it stays in `sourced` and no
-  credit is spent on it. Also correct.
+- **`no_contact`** — the shape cleared the bar, so the property is **queued for
+  enrichment**. The good outcome: once a lookup supplies the address it goes
+  straight into Gate 1, with no second read needed from you.
+- **`below_shape`** — FAR and acreage put it below the yield base rate, so it
+  stays in `sourced` and no credit is spent on it. Also correct, and **not
+  something a better write-up can change** — it is a verdict on the site, not on
+  your read of it.
 
-Either way the overlay is stored. Do it now, while the record is in front of you:
-the score is reproducible from the rubric, but the `checks` and the `why` are not.
+You should never see `no_score` or `below_score` here. If you do, the property was
+stored with an asking price and is being gated as a priced listing — check the
+ingest rather than adding a score to make the message go away.
 
-**Send a computed `score`, never a blank one.** It is what decides whether a
-lookup is ever spent on the property at all — a missing one holds it (`no_score`)
-and it goes nowhere. **Compute it; don't aim it.** The floor is the gateway's and
-you are not told where it sits, so there is nothing to aim at even if you wanted
-to — apply the rubric and report what it gives you. If a site reads better than
-it scores, that belongs in `checks` and `why`, where a human will read it.
+Either way the overlay is stored, so write it now, while the record is in front of
+you. The shape tier is reproducible; the `checks` and the `why` are not.
 
 ## Reporting back
 
-How many properties captured, the ingest counts (`new` / `updated`), and how many
-you scored (`saved`) — with `held` alongside, which for Reonomy will normally equal
-`saved`, since the owner shell has no email.
+How many properties captured, the ingest counts (`new` / `updated` / **`queued`**),
+and how many overlays you wrote (`saved`) — with `held` alongside, which for
+Reonomy will normally equal `saved`, since the owner shell has no email.
+
+**Lead with `queued`.** It is the one number that says how much of the export was
+worth a lookup, and it is decided at ingest before you write anything.
 
 **Break the holds down, because the two mean opposite things.** `no_contact` is
-the score clearing the bar — those are now queued for enrichment and will reach
-Gate 1 as soon as an address lands. `below_score` did not clear it, so no lookup
-will be spent and the property waits in `sourced`. Reporting a single `held` total
+the shape clearing the bar — those are queued for enrichment and will reach Gate 1
+as soon as an address lands. `below_shape` did not clear it, so no lookup will be
+spent and the property waits in `sourced`. Reporting a single `held` total
 hides which of your reads actually moved anything.
 
 ## Edge cases

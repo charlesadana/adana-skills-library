@@ -13,7 +13,7 @@ description: >-
   it from here".
 allowed-tools: mcp__gateway__adana_screen_costar mcp__gateway__adana_ingest_costar_export mcp__gateway__adana_targets_needing_qualification mcp__gateway__adana_save_qualification
 area: Collection
-use_for: "Process a CoStar export the user has placed in the project folder: map all 39 columns, screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + contacts, then score every priced property the gateway kept from the stated rubric — draining the backlog until only unscorable rows remain."
+use_for: "Process a CoStar export the user has placed in the project folder: map all 39 columns, screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + contacts, then score every priced property the gateway kept from the stated rubric — draining the backlog until it returns empty."
 deps:
   mcp: []
   gateway: ["adana_screen_costar", "adana_ingest_costar_export", "adana_targets_needing_qualification", "adana_save_qualification"]
@@ -557,26 +557,22 @@ question you ask the gateway, not a list you keep in your head.
 
 It also survives a session ending mid-batch, which the old approach did not.
 
-**Keep calling until every row that comes back is one you are not allowed to
-score — not until the list is empty.** It will never be empty. The gateway
-selects on "kept, and no qualification recorded", which is true for ever of the
-two kinds of row you must skip:
+**Keep calling until it returns empty**, which since gateway v2.8.1 it can.
+Every row you get back is one to score.
 
-- **`source_variant: "costar_no_price"`** — no price, so no ratio, so no score
-  (see below). These are already routed on site shape and are simply not your
-  work.
-- **rows that came back `incomplete` at ingest** — priced, but stored without RBA
-  or acreage, so the screen never ran and `criteria_notes` carries no verdict.
-  There is no Basis, Coverage or Size to compute. **Don't score them and don't
-  guess**: re-read those rows from the export and re-send them through Step 4
-  with the missing columns. They stay in the backlog until the columns arrive,
-  which is the system telling you the truth.
+No-price listings are no longer in it. The gateway filters `costar_no_price` out
+and returns the count separately as **`no_price_pending`** — report that number,
+never work it. Before v2.8.1 they were included, and since the skill is forbidden
+to score them the loop could not terminate: measured against production, **all 555
+rows in the backlog were no-price and not one was scorable**. The tool was handing
+back a work list made entirely of work that had to be refused.
 
-So the terminating condition is **"nothing left but unscorable rows"**. Ask for a
-larger `limit` (up to 500) if a capped batch is all no-price, since the tool has
-no offset and pages from the oldest — a batch of 40 that is entirely unscorable
-will return the identical 40 for ever otherwise. Then **report the count you left
-behind and why**, and stop. Grinding the same batch is not draining a backlog.
+One kind of row still legitimately reappears: **a priced row that came back
+`incomplete` at ingest**. It was stored without RBA or acreage, so the screen
+never ran, `criteria_notes` carries no verdict, and there is no Basis, Coverage or
+Size to compute. **Don't score it and don't guess** — re-send it through Step 4
+with the missing columns. It stays in the backlog until they arrive, which is the
+system telling you the truth rather than a loop to break.
 
 ### The scoring rubric
 
@@ -711,15 +707,13 @@ send**. Do not invent one — a fabricated score is compared against the same
 threshold as a measured one, and there is no way to tell them apart afterwards.
 
 Those properties were already routed at ingest on site shape, into broker pricing
-outreach (flow3). Skip them here — and expect them back in the work list on every
-call, for ever, since the gateway selects on "no qualification recorded" and they
-will never have one.
+outreach (flow3), and since gateway v2.8.1 they no longer appear in the work list
+at all — only as a `no_price_pending` count.
 
-**This rule is about `costar_no_price`, not about missing prices generally.** A
-Reonomy off-market lead has no price either, and it *must* still be scored: it
-lands in `sourced` with no shape triage behind it, so the score is its only route
-into the enrichment queue. `reonomy-saved-search` carries that rubric. Applying
-this skill's "no price, no score" to a Reonomy lead parks it permanently.
+**The same rule now covers every unpriced property, Reonomy included.** Gateway
+v2.9.0 gates an unpriced property on its shape tier rather than on a score, and
+ignores a score sent on one. So there is a single rule: **priced → compute the
+score; unpriced → send no score at all.** `reonomy-saved-search` follows it too.
 
 Score **every priced property in the work list**, including ones with no contact.
 The score itself is reproducible — that is what a rubric buys — but the `checks`
@@ -793,6 +787,9 @@ Holds are normal, and each reason means something different:
   progress, not a problem**: the property is now queued for enrichment, and the
   address it comes back with carries it straight into Gate 1 without needing
   another read from you.
+- **`below_shape`** — you should never see this on a priced property. It is the
+  unpriced gate (`reonomy-saved-search`, flow3), and its appearance here means a
+  listing you treated as priced was stored without an asking price.
 
 The reasons are checked in that order, and the order is deliberate. Below the
 floor, "find a contact" is not the fix that comes first — the lookup would not be
@@ -829,16 +826,16 @@ outstanding rather than done:
 
 - **`incomplete`** — rows you under-sent, still unscreened. Name the count and say
   they need resending.
-- **the backlog** — say what you left behind and **which kind it is**, because the
-  two mean opposite things. Rows you simply did not reach are outstanding work:
-  name the count and say the backlog is not drained. Rows left because they are
-  **unscorable** are not outstanding at all — `costar_no_price` never gets a score
-  by design, and `incomplete` rows need columns resent through Step 4, not a
-  score. *"Scored 684; 212 no-price left by design; 9 incomplete and awaiting a
-  resend; backlog otherwise drained."* Reporting one undifferentiated "still 221
-  unscored" reads as a failed run when most of it is the system behaving. Never
-  imply the batch is complete when it isn't — that is how 466 properties were
-  lost — but don't call a designed skip a shortfall either.
+- **the backlog** — say whether it drained, and keep three numbers apart. Rows you
+  did not reach are outstanding work: name the count and say so. **`no_price_pending`**
+  is not outstanding at all — the gateway holds those back by design and hands you
+  the count precisely so you can report them without working them. `incomplete`
+  rows need columns resent through Step 4, not a score. *"Scored 684, backlog
+  drained; 555 no-price held back by design; 9 incomplete and awaiting a resend."*
+  One undifferentiated "still 564 unscored" reads as a failed run when almost all
+  of it is the system behaving. Never imply the batch is complete when it isn't —
+  that is how 466 properties were lost — but don't call a designed skip a
+  shortfall either.
 
 ## Edge cases
 

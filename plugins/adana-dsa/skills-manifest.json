@@ -2,7 +2,7 @@
   {
     "name": "costar-saved-search",
     "area": "Collection",
-    "use_for": "Process a CoStar export the user has placed in the project folder: map all 39 columns, screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + contacts, then score every priced property the gateway kept from the stated rubric — draining the backlog until only unscorable rows remain.",
+    "use_for": "Process a CoStar export the user has placed in the project folder: map all 39 columns, screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + contacts, then score every priced property the gateway kept from the stated rubric — draining the backlog until it returns empty.",
     "description": ">-",
     "deps": {
       "mcp": [],
@@ -25,7 +25,7 @@
   {
     "name": "reonomy-saved-search",
     "area": "Collection",
-    "use_for": "Process a Reonomy export the user has placed in the project folder: persist deduped off-market properties + owner contact shells (flow2), and write back a qualification: a rubric-computed score plus the strategic read.",
+    "use_for": "Process a Reonomy export the user has placed in the project folder: persist deduped off-market properties + owner contact shells (flow2), which the gateway triages on site shape at ingest, then write back the strategic read — action, why and checks, with NO score.",
     "description": ">-",
     "deps": {
       "mcp": [],

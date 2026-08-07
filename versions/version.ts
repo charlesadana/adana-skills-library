@@ -1,5 +1,5 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.8.1';
+const DEFAULT_VERSION = 'v0.9.0';
 const DEFAULT_DATE = 'Aug 7, 2026';
 
 // Export constants initially with default values
@@ -9,6 +9,19 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.9.0',
+    date: 'Aug 7, 2026',
+    changes: [
+      'The Reonomy scoring rubric introduced in v0.8.1 is REMOVED. It should never have been written. `triage.ts` in the gateway has said since it was authored that a shape tier is "nowhere near precise enough to put on the same 1-10 scale the price screen produces" — the best segment is a 46.7% coin flip against a 19.2% base rate — and that writing one into `score` "would make GATE1_MIN_SCORE compare a measurement against a guess". The rubric did exactly that, and because it dropped the 62.5% price term and renormalised the rest, it scored a THINNER export higher than a fuller one: losing `building_sf` removed the coverage component and pushed the remaining weights up, so the same site scored 8 with less data and 7 with more. It also cleared a floor of 8 more easily than a sound priced warehouse could.',
+      'The reason it was written at all was a gateway hole, now closed in gateway v2.9.0: an unpriced property could only leave `sourced` by a score clearing GATE1_MIN_SCORE, and it can never have one. Flow2 was structurally dead and inventing a score was the only exit. The gateway now triages unpriced properties on site shape at ingest — Reonomy included — and gates them on that tier instead, so nothing here needs a number.',
+      'ONE rule now covers every source: priced means compute the score from the rubric; unpriced means send NO score at all. It applies to `costar_no_price` listings and every Reonomy lead alike, and the gateway ignores a score sent on an unpriced property rather than grading on it. v0.8.1 had the two skills stating opposite rules with no explanation of why, which read as a contradiction because nothing had written down that they were different populations.',
+      'reonomy-saved-search reports `queued` from the ingest — how many leads the shape triage judged worth a lookup — and leads its report with it. `queued: 0` on a real export is called out as worth investigating, usually a missing `building_sf` column making FAR underivable so every row falls to LOW. Holds are `below_shape` and `no_contact`; `no_score` / `below_score` appearing there now means the property was stored with a price and is being gated as a priced listing.',
+      'costar-saved-search: the backlog loop terminates on "empty" again, because gateway v2.8.1 filters `costar_no_price` out of `adana_targets_needing_qualification` and returns the count as `no_price_pending`. The v0.8.1 workaround — keep going until every row left is unscorable, raise the limit past a stuck batch — is gone, along with the instruction to expect unscorable rows for ever. Measured on production at the time: all 555 rows in the backlog were no-price and not one was scorable.',
+      'Reporting guidance updated to keep three numbers apart that were being summed into one: rows not reached (outstanding work), `no_price_pending` (held back by design, and handed to you precisely so it can be reported without being worked), and `incomplete` (needs columns resent, not a score).',
+      'agents/adana.md restated throughout: `needs_enrichment` has exactly two doors and which applies depends on price; the score paragraph distinguishes priced from unpriced; the tool table carries the new `queued`, `no_price_pending` and `below_shape`. apollo-email-lookup and lexisnexis-contact-lookup now describe the queue door as "any unpriced property" rather than naming CoStar alone.',
+    ],
+  },
   {
     version: 'v0.8.1',
     date: 'Aug 7, 2026',
@@ -183,14 +196,6 @@ export const VERSION_HISTORY: Array<{ version: string; date: string; changes: st
       'adana-setup Step 5a: agent-file lookup now globs $CLAUDE_CONFIG_DIR first (Cowork sandbox is Ubuntu regardless of host), with Windows/macOS fallbacks and an ask-the-user escape hatch',
       'plugin-update Step 0: replaced the literal <path_to_agents/adana.md> placeholder with the real Cowork-first locator; Step 1a now searches up from cwd for settings.local.json; Step 1c checks for the Credential Loading block; Step 3c re-embeds adana.md unconditionally every run',
       'Fixed version drift — plugin.json and marketplace.json were stuck at 0.1.0 across three releases; all four version files now bump in lockstep (enforced in workflow/commit-to-git.md)',
-    ],
-  },
-  {
-    version: 'v0.2.2',
-    date: 'Jul 14, 2026',
-    changes: [
-      'adana-setup: added Step 6 — schedule weekly Monday collection via Cowork /schedule (CoStar → Reonomy → LexisNexis); includes "computer must be on" warning aligned with liangzai-setup pattern',
-      'plugin-update: added Step 1e scheduled task check (ask user), gap report row, Step 3d fill handler, Step 4 re-validate for Adana · Weekly Collection',
     ],
   },
 ];

@@ -77,9 +77,9 @@ address; they simply have not earned a lookup yet.
 
 **The list is the QUEUE, already shortlisted — do not filter or rank it further.**
 It contains only contacts on properties in `needs_enrichment`, and a property
-earns that place by its computed score clearing the floor, or — for a **CoStar**
-listing with no asking price, which can never be scored — by a site shape worth a
-broker call. Every row is one somebody has already decided is worth the work.
+earns that place by its computed score clearing the floor (priced properties), or
+— for any UNPRICED property, which can never be scored — by a site shape the
+gateway judged worth a call. Every row is one somebody has already decided is worth the work.
 
 **Run `apollo-email-lookup` first.** It works this same queue by API, unattended
 and at trivial cost, so whatever reaches your sheet is what Apollo could not

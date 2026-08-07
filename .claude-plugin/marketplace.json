@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "Automated deal-sourcing skills for Adana Capital — processes CoStar / Reonomy exports and enriches contacts via Apollo and LexisNexis, persisting to the Adana gateway.",
-    "version": "0.8.1"
+    "version": "0.9.0"
   },
   "plugins": [
     {
       "name": "adana-dsa",
       "source": "./plugins/adana-dsa",
       "description": "Adana deal-sourcing agent — processes CoStar / Reonomy exports and finds missing contact emails via the Apollo API and LexisNexis, persisting everything through the Adana gateway MCP.",
-      "version": "0.8.1",
+      "version": "0.9.0",
       "author": {
         "name": "Adana Capital",
         "email": "charles@adanacap.com"

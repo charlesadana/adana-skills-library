@@ -82,8 +82,9 @@ has_mobile, already_attempted, property_status }`.
 
 **This list is already the shortlist — do not filter it further.** It contains
 only contacts on properties in `needs_enrichment`, which is a *queue* a property
-has to earn: either a rubric-computed score clearing the floor, or (for a **CoStar**
-listing with no asking price) a site shape that justifies a broker call. Every
+has to earn: either a rubric-computed score clearing the floor (priced properties),
+or a site shape that justifies a broker call (any UNPRICED property — a no-price
+CoStar listing or a Reonomy lead). Every
 row is a property somebody has already decided is worth a credit.
 
 That matters because the list used to be every contact without an email on any
