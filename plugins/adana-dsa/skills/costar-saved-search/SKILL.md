@@ -13,7 +13,7 @@ description: >-
   it from here".
 allowed-tools: mcp__gateway__adana_screen_costar mcp__gateway__adana_ingest_costar_export mcp__gateway__adana_targets_needing_qualification mcp__gateway__adana_save_qualification
 area: Collection
-use_for: "Process a CoStar export the user has placed in the project folder: screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + contacts, then score every property the gateway kept — draining the backlog until it is empty."
+use_for: "Process a CoStar export the user has placed in the project folder: map all 39 columns, screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + contacts, then score every priced property the gateway kept from the stated rubric — draining the backlog until only unscorable rows remain."
 deps:
   mcp: []
   gateway: ["adana_screen_costar", "adana_ingest_costar_export", "adana_targets_needing_qualification", "adana_save_qualification"]
@@ -288,15 +288,25 @@ with_contact = sum(1 for l in listings if l.get("broker"))
 with_email   = sum(1 for l in listings if l.get("broker", {}).get("email"))
 with_geo     = sum(1 for l in listings if l.get("latitude") is not None)
 with_type    = sum(1 for l in listings if l.get("property_type"))
+pct = lambda n: 100 * n / len(listings) if listings else 0
 print(f"{len(listings)} listings, {with_contact} with a contact "
       f"({with_email} of them with an email), {skipped} skipped (no address)")
-print(f"geo on {with_geo}, type on {with_type} — both should be near 100% and ~89%")
+print(f"geo {pct(with_geo):.0f}% (expect ~100), type {pct(with_type):.0f}% (expect ~89)")
 ```
 
-**Check those last two numbers.** `with_geo` near zero means the `Latitude` /
-`Longitude` columns are absent, which is the wrong layout. `with_type` near zero
-means the header calls the column something other than `Secondary Type` — read
-the printed header and map what is actually there rather than shipping nulls.
+**Check those last two percentages before going any further** — as rates, not raw
+counts, so the check means the same thing on a 20-row export and a 500-row one.
+Anything far below expectation is a mapping failure, not a thin export:
+
+- **geo well under 100%** — the `Latitude` / `Longitude` columns are absent, which
+  means the wrong layout was used. Ask for a re-export rather than proceeding.
+- **type well under 89%** — the header calls the column something other than
+  `Secondary Type`. Read the printed header and map what is actually there.
+  Shipping nulls here is not a small loss: `property_type` is a scored component
+  in Step 5, so every null quietly removes part of the score.
+
+A zero on either is the failure this whole mapping exists to prevent, and it is
+invisible downstream — the ingest returns a clean count either way.
 
 **Keep `with_contact`** — Step 4 checks the gateway's `contacts` count against it.
 
@@ -446,9 +456,19 @@ adana_ingest_costar_export(
   location: "<saved search name>",
   listings: [ { address_raw, city, state, zip, property_type, building_sf,
                 lot_size_acres, asking_price,
+                latitude, longitude, submarket, market, days_on_market,
+                year_built, tenancy, percent_leased, parking_ratio,
+                last_sale_date, last_sale_price, cap_rate, source_attributes,
                 broker: { first_name, last_name, email, mobile, company, title, contact_type } }, ... ]
 )
 ```
+
+**Send the whole `listings` list exactly as Step 2 built it.** The gateway accepts
+every field above, and the detail block is the reason Step 2 maps 21 columns
+instead of 8 — trimming back to the property block here would put the columns
+straight back in the bin they were just rescued from. `property_type` must be the
+`Secondary Type` value; `last_sale_date` an ISO date, never the Excel serial;
+`cap_rate` and `percent_leased` percentage points, never fractions.
 
 On the `broker` object:
 
@@ -523,9 +543,9 @@ adana_targets_needing_qualification(gateway_api_key: "${GATEWAY_API_KEY}", limit
 ```
 
 Returns properties the gateway **kept but nobody has scored**, oldest first, with
-the raw columns you need. **Keep calling it until it comes back empty.** The
-response includes `more_likely`, which is true when the batch came back full — so
-you can tell "backlog drained" from "batch was capped".
+the raw columns you need and each row's `source_variant`. The response includes
+`more_likely`, which is true when the batch came back full — so you can tell
+"batch was capped" from "that was the last of them".
 
 This loop is the point. Working from the Step 3 screen result instead is what
 went wrong before: the screen only ever hands you `qualifiers` and `near_misses`,
@@ -537,10 +557,37 @@ question you ask the gateway, not a list you keep in your head.
 
 It also survives a session ending mid-batch, which the old approach did not.
 
+**Keep calling until every row that comes back is one you are not allowed to
+score — not until the list is empty.** It will never be empty. The gateway
+selects on "kept, and no qualification recorded", which is true for ever of the
+two kinds of row you must skip:
+
+- **`source_variant: "costar_no_price"`** — no price, so no ratio, so no score
+  (see below). These are already routed on site shape and are simply not your
+  work.
+- **rows that came back `incomplete` at ingest** — priced, but stored without RBA
+  or acreage, so the screen never ran and `criteria_notes` carries no verdict.
+  There is no Basis, Coverage or Size to compute. **Don't score them and don't
+  guess**: re-read those rows from the export and re-send them through Step 4
+  with the missing columns. They stay in the backlog until the columns arrive,
+  which is the system telling you the truth.
+
+So the terminating condition is **"nothing left but unscorable rows"**. Ask for a
+larger `limit` (up to 500) if a capped batch is all no-price, since the tool has
+no offset and pages from the oldest — a batch of 40 that is entirely unscorable
+will return the identical 40 for ever otherwise. Then **report the count you left
+behind and why**, and stop. Grinding the same batch is not draining a backlog.
+
 ### The scoring rubric
 
-**Step A — the ceiling comes from the screen you already ran.** Charles's bands,
-unchanged:
+**Every band below is lower-bound inclusive, upper-bound exclusive** — `[lo, hi)`.
+A ratio of exactly 60% scores in the 60–70 row, not the 50–60 one; a site of
+exactly 5.0 acres scores in the 5–10 row, not 3–5. State it once and the rubric
+is deterministic; leave it implicit and two runs disagree on the boundaries,
+which is the whole failure this rubric exists to end.
+
+**Step A — get the ratio the gateway already computed. Never re-derive it.**
+Charles's bands, unchanged:
 
 | FAR | Metric | Ceiling |
 |---|---|---|
@@ -548,12 +595,29 @@ unchanged:
 | 10–18% | PLSF | $23 |
 | >18% | PSFB | $120 |
 
-Anything at or above its ceiling failed the screen and was disqualified at ingest,
-so it will never appear in your work list.
+**Where the numbers come from depends on which path you are on**, and the backlog
+path is the usual one:
+
+- **From the work list** (the normal case) each target carries `criteria_notes`,
+  the verdict the gateway computed at ingest — e.g.
+  `FAR 10.6% [10-18%] · PLSF $11.86 < $23 ✓ qualifies`. Read the FAR, the band,
+  the metric, the value and the ceiling straight out of it.
+- **From Step 3's screen result**, when you are scoring rows you just screened,
+  each entry already carries `far_pct` / `band` / `metric` / `value` /
+  `threshold`.
+
+Either way the ratio is `value ÷ ceiling`. **Do not recompute PLSF or PSFB from
+price and acreage** — the gateway is the single deriver of those, and a second
+derivation is how two answers to the same question appear.
+
+A property at or above its ceiling was rejected `fails_screen` at ingest — and so
+was a near-miss, since the gateway's own screen returns `pass: false` for anything
+within 10% above the ceiling too. **Nothing in your work list has a ratio of 100%
+or more**, which is why the Basis table stops there.
 
 **Step B — four component scores.**
 
-**Basis — 62.5%.** `ratio = value ÷ ceiling`, straight from the `screen` block.
+**Basis — 62.5%.** `ratio = value ÷ ceiling`, as a percentage.
 
 | % of ceiling | Pts | | % of ceiling | Pts |
 |---|---|---|---|---|
@@ -563,7 +627,7 @@ so it will never appear in your work list.
 | 30–40 | 7 | | 80–90 | 2 |
 | 40–50 | 6 | | 90–100 | 1 |
 
-**Coverage — 18.75%.** Charles's three bands.
+**Coverage — 18.75%.** The FAR band, which the screen already assigned.
 
 | FAR | Pts |
 |---|---|
@@ -589,21 +653,35 @@ so it will never appear in your work list.
 | Data Center, Supermarket, Refrigeration/Cold Storage | 1 |
 | unknown / missing | 5 |
 
+**Type is the only component with a fallback**, and it is deliberate. Basis,
+Coverage and Size are all guaranteed present: a row that reached your work list
+was screened, and it could only be screened because price, RBA and acreage were
+all there. `Secondary Type` is 89% filled, so the missing 11% get a neutral 5
+rather than a hole. If Basis, Coverage or Size is genuinely absent, you are
+looking at an **`incomplete` row** — see below — not a scoring problem.
+
 **Step C — blend and round.**
 
 ```
 score = round( 0.625×Basis + 0.1875×Coverage + 0.125×Size + 0.0625×Type )
 ```
 
+Round half up, so 5.5 → 6. The weights sum to exactly 1, so a property scoring
+10 on all four scores 10 — which the rule that preceded this one could not do.
+
 **Worked, from real properties:**
 
-> **224 Zander Ln** — FAR 2.8%, 9.0 ac, PLSF $3.66 against $17.
-> ratio 0.215 → Basis **8** · Coverage **10** · Size **9** · Type **5** (unknown)
-> `5.00 + 1.88 + 1.13 + 0.31 = 8.31` → **score 8**
+> **224 Zander Ln** — FAR 2.8%, 9.0 ac, PLSF $3.66 against $17, type unknown.
+> ratio 21.5% → Basis **8** · Coverage **10** · Size **9** · Type **5**
+> `5 + 1.875 + 1.125 + 0.3125 = 8.3125` → **score 8**
 
 > **12128 Zion Rd** — FAR 4.5%, 2.5 ac, PLSF $10.68 against $17, Warehouse.
-> ratio 0.628 → Basis **4** · Coverage **10** · Size **5** · Type **7**
-> `2.50 + 1.88 + 0.63 + 0.44 = 5.44` → **score 5**
+> ratio 62.8% → Basis **4** · Coverage **10** · Size **5** · Type **7**
+> `2.5 + 1.875 + 0.625 + 0.4375 = 5.4375` → **score 5**
+
+**Carry the unrounded terms and round once, at the end.** Rounding each term to
+two decimals first and adding those makes 8.3125 come out as 8.32 — harmless
+here, but on a total sitting near a boundary it moves the score by a whole point.
 
 Note the second one: cheap enough to pass the screen comfortably, but a small
 site pulls it down. That is the rubric doing its job — price alone was never the
@@ -633,19 +711,29 @@ send**. Do not invent one — a fabricated score is compared against the same
 threshold as a measured one, and there is no way to tell them apart afterwards.
 
 Those properties were already routed at ingest on site shape, into broker pricing
-outreach (flow3). Skip them here.
+outreach (flow3). Skip them here — and expect them back in the work list on every
+call, for ever, since the gateway selects on "no qualification recorded" and they
+will never have one.
+
+**This rule is about `costar_no_price`, not about missing prices generally.** A
+Reonomy off-market lead has no price either, and it *must* still be scored: it
+lands in `sourced` with no shape triage behind it, so the score is its only route
+into the enrichment queue. `reonomy-saved-search` carries that rubric. Applying
+this skill's "no price, no score" to a Reonomy lead parks it permanently.
 
 Score **every priced property in the work list**, including ones with no contact.
-That judgment is captured now or lost.
+The score itself is reproducible — that is what a rubric buys — but the `checks`
+and the `why` are captured now or lost, because nobody comes back to a property
+with the listing and the map open a second time.
 
 ```
 adana_save_qualification(
   gateway_api_key: "${GATEWAY_API_KEY}",
   items: [{
     address_raw: "<same address you ingested>",   // or property_id
-    score: 1-10,                                  // REQUIRED — COMPUTED from the rubric above
+    score: 6,                                     // REQUIRED — COMPUTED from the rubric above
     action: "PURSUE" | "REVIEW" | "PASS",
-    why: "<one sentence — deal basis only: property type, acreage, city, FAR band, and the PLSF/PSFB clearance. e.g. 'Laydown Yard on 11.9 ac in Crosby. FAR 10.6% [10-18%] — PLSF $11.86 < $23, clears the buy-box on basis.'>",
+    why: "Truck Terminal on 11.9 ac in Crosby. FAR 10.6% [10-18%] — PLSF $11.86 < $23, clears the buy-box on basis.",
     checks: [
       { "label": "Significant outdoor storage (stabilized yard)", "pass": true },
       { "label": "Major highway access", "pass": true, "note": "I-10 / SH-146" },
@@ -654,11 +742,18 @@ adana_save_qualification(
       { "label": "Near Class I railyard", "pass": true, "note": "UP ~6 mi" },
       { "label": "Redevelopment / vacancy upside", "pass": false }
     ],
-    screen: { far: 0.105, metric: "PLSF", value: 13.8, threshold: 23, band: "10-18%", pass: true,
-              basis_pts: 5, coverage_pts: 6, size_pts: 10, type_pts: 7 }
+    screen: { far: 0.106, metric: "PLSF", value: 11.86, threshold: 23, band: "10-18%", pass: true,
+              basis_pts: 5, coverage_pts: 6, size_pts: 10, type_pts: 10 }
   }, ... ]
 )
 ```
+
+**That example is one property throughout, and it checks out** — deliberately, so
+it can be used as a template without carrying an error into every row. PLSF
+$11.86 ÷ $23 = 51.6% → Basis **5**; FAR 10.6% is the 10–18% band → Coverage **6**;
+11.9 acres → Size **10**; Truck Terminal → Type **10**. Blend:
+`3.125 + 1.125 + 1.25 + 0.625 = 6.125` → **score 6**. If you change any figure in
+a worked example, re-run the arithmetic on the rest.
 
 - **Keep `why` to the deal basis, one sentence.** Property type, acreage, city, FAR
   band, PLSF/PSFB clearance. The strategic read belongs in `checks`, not the prose.
@@ -670,9 +765,14 @@ adana_save_qualification(
   or map actually supports it; otherwise `pass: false` with a short note. An
   unverifiable criterion is a real signal — fabricating one is worse than leaving
   it false.
-- **`action` is your read, and it is separate from the score.** `PURSUE` when you
-  would actually work this property; `REVIEW` when it clears the screen but you
-  have a reason to hold. The score is arithmetic; the action is judgment.
+- **`action` is your read, and it is separate from the score.** All three values
+  are in use, so pick deliberately rather than defaulting: **`PURSUE`** when you
+  would actually work this property now; **`REVIEW`** when it clears the screen
+  but something about the site, the timing or the map says hold; **`PASS`** when
+  you would not work it whatever the arithmetic says — a rail-served site with no
+  yard, a strip of frontage with no depth, a location you already know. The score
+  is arithmetic and cannot see any of that, which is exactly why the action is a
+  separate field and not a restatement of the number.
 - Batch all rows into one call.
 
 ### Scoring is not promoting
@@ -687,8 +787,8 @@ Holds are normal, and each reason means something different:
 
 - **`no_score`** — always your bug. Omitting the score holds the property; it does
   not slip past.
-- **`below_score`** — the conviction score was too low to put in front of a human.
-  The system working.
+- **`below_score`** — the rubric put it too low to place in front of a human. Not
+  a verdict on your read; the arithmetic said so. The system working.
 - **`no_contact`** — cleared the floor, but there is no email yet. **This one is
   progress, not a problem**: the property is now queued for enrichment, and the
   address it comes back with carries it straight into Gate 1 without needing
@@ -719,7 +819,7 @@ Numbers that are easy to conflate — report them separately:
   shape."* A quarter of an export being rejected is ordinary.
 - **`qualified` vs `saved`** — `saved` is overlays stored; `qualified` is how many
   reached Gate 1. Break holds down by reason: *"scored 684 — 221 clear the floor,
-  of which 198 are now queued for enrichment; 463 held on conviction score."*
+  of which 198 are now queued for enrichment; 463 held below the score floor."*
 - **`with_email`** — how many contacts still lack an email. If the layout carried
   no email column, say so: adding one is the single highest-value change available
   to this pipeline.
@@ -729,9 +829,16 @@ outstanding rather than done:
 
 - **`incomplete`** — rows you under-sent, still unscreened. Name the count and say
   they need resending.
-- **the backlog** — if `adana_targets_needing_qualification` still returns rows
-  when you stop, say how many are left unscored. Never end a run implying the
-  batch is complete when it isn't; that is exactly how 466 properties were lost.
+- **the backlog** — say what you left behind and **which kind it is**, because the
+  two mean opposite things. Rows you simply did not reach are outstanding work:
+  name the count and say the backlog is not drained. Rows left because they are
+  **unscorable** are not outstanding at all — `costar_no_price` never gets a score
+  by design, and `incomplete` rows need columns resent through Step 4, not a
+  score. *"Scored 684; 212 no-price left by design; 9 incomplete and awaiting a
+  resend; backlog otherwise drained."* Reporting one undifferentiated "still 221
+  unscored" reads as a failed run when most of it is the system behaving. Never
+  imply the batch is complete when it isn't — that is how 466 properties were
+  lost — but don't call a designed skip a shortfall either.
 
 ## Edge cases
 

@@ -389,7 +389,7 @@ That is why the export doesn't have to be timed to the job. The skill tracks wha
 
 **Reonomy is not scheduled either.** Run `/adana-dsa:reonomy-saved-search` on demand when you want off-market owners; its output flows into the same enrichment queue.
 
-**What puts a property into Gate 1 is the CoStar run itself**, not a later cron. `costar-saved-search` scores each property as it ingests it (its "Qualify and write back" step), and the gateway promotes the ones that have a contact and a strong enough conviction score. The gateway's Tuesday screen only refreshes the deterministic price baseline — it does not qualify anything. So if a week's CoStar run doesn't happen, nothing new reaches Gate 1 that week; there is no cron that will catch up on the judgment for you.
+**What puts a property into Gate 1 is the CoStar run itself**, not a later cron. `costar-saved-search` scores each property as it ingests it (its "Qualify and write back" step), and the gateway promotes the ones that have a contact with an email and a high enough score. The gateway's Tuesday screen only refreshes the deterministic price baseline — it does not qualify anything. So if a week's CoStar run doesn't happen, nothing new reaches Gate 1 that week; there is no cron that will catch up on the judgment for you.
 
 **Use Cowork's `/schedule` — do not ask the user to click through settings.** Invoke `/schedule` directly **once per task**, giving it the name, frequency, and prompt. Cowork asks them to confirm, and each task appears on its Scheduled page.
 

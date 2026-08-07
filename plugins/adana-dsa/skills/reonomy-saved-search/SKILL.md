@@ -4,13 +4,13 @@ description: >-
   Process a Reonomy saved-search export for Adana off-market deal sourcing: read
   the CSV the user exported into the project folder, map each property's owner and
   address, persist them through the Adana gateway as off-market leads (flow2), and
-  write back a judgment-led qualification. The user runs the Reonomy export
+  write back a qualification: a rubric-computed score plus the strategic read. The user runs the Reonomy export
   themselves; this skill takes over from the file. Use this whenever the user names
   a Reonomy saved search or asks to "pull Reonomy", "run the off-market search",
   "get owners for [area]", or says they've dropped a Reonomy export in.
 allowed-tools: mcp__gateway__adana_ingest_reonomy mcp__gateway__adana_save_qualification
 area: Collection
-use_for: "Process a Reonomy export the user has placed in the project folder: persist deduped off-market properties + owner contact shells (flow2), and write back a judgment-led qualification."
+use_for: "Process a Reonomy export the user has placed in the project folder: persist deduped off-market properties + owner contact shells (flow2), and write back a qualification: a rubric-computed score plus the strategic read."
 deps:
   mcp: []
   gateway: ["adana_ingest_reonomy", "adana_save_qualification"]
@@ -157,15 +157,65 @@ one — each with its own `location`.
 ## Step 4 — Qualify and write back
 
 Off-market leads usually have **no list price**, so the FAR/PLSF/PSFB screen can't
-run. The call is **judgment**: does the site fit the Adana IOS buy-box on type,
-size and location?
+run and the Basis component — 62.5% of the CoStar score — has nothing to work
+with.
+
+**Score them anyway, and do not import CoStar's rule.** `costar-saved-search` says
+a listing with no price gets no score, and that rule is right *there* and wrong
+here. The difference is what the gateway does at ingest:
+
+| | CoStar no-price | Reonomy off-market |
+|---|---|---|
+| Landed as | triaged on site shape at ingest | `sourced`, no triage at all |
+| Route to enrichment | already routed, on shape | **only** by clearing the score floor |
+| So a score is | an invented number, graded against measured ones | the sole door out of `sourced` |
+
+Skip a Reonomy lead for want of a price and it sits in `sourced` for ever — no
+lookup, no outreach, nothing. That is the failure this step exists to prevent.
+
+### The price-free rubric
+
+Use the **same component tables and the same weights** as
+`costar-saved-search` — Coverage 0.1875, Size 0.125, Type 0.0625 — but over only
+the components you can actually compute, renormalised so the result is still on a
+1–10 scale:
+
+```
+score = round( Σ(weightᵢ × ptsᵢ) ÷ Σ(weightᵢ) )   over computable components only
+```
+
+Same boundary convention: lower bound inclusive, upper exclusive.
+
+- **Coverage** needs `building_sf` **and** `lot_size_acres` to derive FAR. Reonomy
+  carries them only sometimes; drop the component when it can't be derived rather
+  than guessing at one.
+- **Size** is `lot_size_acres`.
+- **Type** is `property_type`, with the same "unknown → 5" fallback.
+
+> **Owner-held 6.2 ac, 41,000 SF building, Warehouse.** FAR = 41,000 ÷ (6.2 ×
+> 43,560) = 15.2% → the 10–18% band → Coverage **6**. 6.2 ac → Size **9**.
+> Warehouse → Type **7**.
+> `(1.125 + 1.125 + 0.4375) ÷ 0.375 = 2.6875 ÷ 0.375 = 7.17` → **score 7**
+
+> **Same site, no building SF in the export.** Coverage drops out.
+> `(0.125×9 + 0.0625×7) ÷ 0.1875 = 1.5625 ÷ 0.1875 = 8.33` → **score 8**
+
+**Those two numbers are the thing to be honest about.** Dropping a component
+renormalises the rest upward, so a thinner export scores *higher* on the same
+site. Say so when you report a run, and prefer a re-export carrying `building_sf`
+over accepting the inflated read.
+
+**If you can compute nothing** — no acreage and no type — you have no basis for a
+number. Send the qualification **without a score** and say so: it will come back
+`no_score`, which is the truthful outcome. A fabricated score is graded against
+the same floor as a computed one with nothing to tell them apart.
 
 ```
 adana_save_qualification(
   gateway_api_key: "${GATEWAY_API_KEY}",
   items: [{
     address_raw: "<same address you ingested>",     // or property_id
-    score: 1-10,                                    // REQUIRED
+    score: 7,                                       // REQUIRED — COMPUTED from the rubric above
     action: "PURSUE" | "REVIEW" | "PASS",
     why: "<one short paragraph — owner/asset/location fit, and that pricing is TBD>",
     checks: [ { "label": "Significant outdoor storage (stabilized yard)", "pass": true, "note": "<acres>" }, ... ]
@@ -173,7 +223,10 @@ adana_save_qualification(
 )
 ```
 
-Omit the `screen` block when there's no price.
+**Omit the `screen` block when there's no price** — there is no FAR/PLSF/PSFB
+result to put in it, and no `basis_pts`. Record the components you *did* compute
+in the `why` instead (`"Coverage 6 · Size 9 · Type 7 → 7"`), so a total that looks
+wrong later can be checked rather than merely doubted.
 
 Same honesty rule as CoStar: assert a location check only where the Reonomy record
 or the map supports it. Pricing is unknown, so most off-market leads land `REVIEW`
@@ -190,15 +243,15 @@ without one — outreach runs on email.
 - **`below_score`** — it did not clear the bar, so it stays in `sourced` and no
   credit is spent on it. Also correct.
 
-Either way the overlay is stored. Score them now, while the record is in front of
-you; that judgment is unrecoverable later.
+Either way the overlay is stored. Do it now, while the record is in front of you:
+the score is reproducible from the rubric, but the `checks` and the `why` are not.
 
-**Still send a real `score`.** It is what decides whether a lookup is ever spent
-on the property at all — a missing one holds it (`no_score`) and it goes nowhere.
-Off-market leads with no price are genuinely hard to call: score them honestly low
-rather than inflating to keep them moving. **The judgment is yours; the cutoff is
-the gateway's**, and you are not told where it sits — that is what keeps the score
-a measurement rather than a target.
+**Send a computed `score`, never a blank one.** It is what decides whether a
+lookup is ever spent on the property at all — a missing one holds it (`no_score`)
+and it goes nowhere. **Compute it; don't aim it.** The floor is the gateway's and
+you are not told where it sits, so there is nothing to aim at even if you wanted
+to — apply the rubric and report what it gives you. If a site reads better than
+it scores, that belongs in `checks` and `why`, where a human will read it.
 
 ## Reporting back
 
