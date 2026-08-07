@@ -2,13 +2,14 @@
   {
     "name": "costar-saved-search",
     "area": "Collection",
-    "use_for": "Process a CoStar export the user has placed in the project folder: screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + contacts, and write back the qualification (score + why + buy-box checklist).",
+    "use_for": "Process a CoStar export the user has placed in the project folder: screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + contacts, then score every property the gateway kept — draining the backlog until it is empty.",
     "description": ">-",
     "deps": {
       "mcp": [],
       "gateway": [
         "adana_screen_costar",
         "adana_ingest_costar_export",
+        "adana_targets_needing_qualification",
         "adana_save_qualification"
       ],
       "files": [

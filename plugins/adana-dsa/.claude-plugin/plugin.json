@@ -1,6 +1,6 @@
 {
   "name": "adana-dsa",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Adana deal-sourcing agent — runs CoStar / Reonomy saved searches under Adana's own logins, finds missing contact emails via the Apollo API and LexisNexis, and persists everything through the Adana gateway MCP.",
   "author": {
     "name": "Adana Capital",

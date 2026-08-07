@@ -1,6 +1,6 @@
 // Version information (production)
-const DEFAULT_VERSION = 'v0.6.0';
-const DEFAULT_DATE = 'Aug 6, 2026';
+const DEFAULT_VERSION = 'v0.7.0';
+const DEFAULT_DATE = 'Aug 7, 2026';
 
 // Export constants initially with default values
 export const APP_VERSION = DEFAULT_VERSION;
@@ -9,6 +9,20 @@ export const RELEASE_DATE = DEFAULT_DATE;
 // NOTE: Keep only last 15 versions to prevent git overload (following Next.js pattern)
 // Full history available in GitHub releases and git commits
 export const VERSION_HISTORY: Array<{ version: string; date: string; changes: string[] }> = [
+  {
+    version: 'v0.7.0',
+    date: 'Aug 7, 2026',
+    changes: [
+      'costar-saved-search Step 5 now ASKS the gateway what still needs scoring, via the new `adana_targets_needing_qualification`, and keeps asking until it comes back empty. This is the fix for the failure that prompted the whole release: the skill said "score every property you ingested", but Step 3 only ever hands back `qualifiers` and `near_misses`, so that quietly meant "score everything the screen surfaced". 466 properties reached the database with no assessment recorded against them at all — indistinguishable from ones nobody had reached yet — and because nothing ever asked what was left over, they stayed that way. The backlog is now a question you ask, not a list you keep in your head, and it survives a session ending mid-batch.',
+      'No-price listings must NOT be given a score. Every buy-box measure divides by price, so a no-price listing has no ratio to grade; inventing a number puts a guess on the same 1-10 scale as a measurement, compared against the same threshold, with no way to tell them apart afterwards. Those properties are routed at ingest on site shape instead, into broker pricing outreach. Stated in costar-saved-search Step 5 and in the tool description.',
+      'Screen and ingest results are documented as they now behave. `adana_screen_costar` lands every row in exactly one of five buckets — `qualifiers` / `near_misses` / `screened_out` / `no_price` / `incomplete` — with an accounting invariant to check against. `adana_ingest_costar_export` returns `kept`, `rejected` by reason, and `incomplete`. The skills now spell out which of those are ordinary (rejection: roughly a quarter of an export) and which mean the agent under-sent and must resend (`incomplete`), because conflating the two is what let rows disappear quietly.',
+      '`needs_enrichment` is documented as a QUEUE rather than a description, across every skill that touches it. It no longer means "lacks an email" — it means "worth spending a lookup on, and still missing an address", earned by a conviction score clearing the floor or by a no-price site shape worth a broker call. apollo-email-lookup and lexisnexis-contact-lookup are told not to filter or re-rank the work list, since the ranking has already happened; an empty list now means "the queue is drained", which is a far smaller claim than "every contact has an email" and the one that is actually true.',
+      'reonomy-saved-search corrected: new properties land in `sourced`, not on the enrichment work list. Gateway v2.7.1 made the same change on the server, and without it every Reonomy run would have dropped its whole result set onto the queue unscored.',
+      'Two long-standing errors fixed in agents/adana.md, both of which would have had the agent report the pipeline wrongly. It claimed a phone "lets the property reach Gate 1" — untrue since gateway v2.5.0, where only an email does — and its hold-reason ordering predated the score-before-contact check. The tool table gains `adana_targets_needing_qualification` and `promoted_to_gate1`.',
+      'Enrichment write-back now reports `promoted_to_gate1`: properties where the address was the last missing piece and which therefore went straight to a human approval queue rather than waiting to be re-read. `enriched` counts addresses found; this counts deals unlocked. Both enrichment skills are told to report it.',
+      'marketplace.json had drifted to 0.5.1 while plugin.json and version.ts sat at 0.6.0 — exactly the lockstep failure the commit workflow warns about. All four version locations are back in step at 0.7.0.',
+    ],
+  },
   {
     version: 'v0.6.0',
     date: 'Aug 6, 2026',

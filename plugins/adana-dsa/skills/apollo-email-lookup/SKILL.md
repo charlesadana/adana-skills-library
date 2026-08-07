@@ -3,7 +3,8 @@ name: apollo-email-lookup
 description: >-
   Find the missing work EMAIL for Adana's contacts using Apollo, entirely through
   its API — no browser, no logged-in session. Takes the work list from the Adana
-  gateway (every contact still without an email), finds each person in Apollo's
+  gateway (the enrichment queue: contacts without an email, on properties already
+  judged worth the lookup), finds each person in Apollo's
   database, confirms it is genuinely the right person before spending a credit,
   pulls the verified work email, and writes it back through the gateway. Use this
   whenever the user wants to "find broker emails", "enrich contacts with Apollo",
@@ -79,6 +80,18 @@ Returns one entry per contact with no email, least-recently-attempted first:
 `{ contact_id, first_name, last_name, contact_type, address, city, state,
 has_mobile, already_attempted, property_status }`.
 
+**This list is already the shortlist — do not filter it further.** It contains
+only contacts on properties in `needs_enrichment`, which is a *queue* a property
+has to earn: either a conviction score clearing the buy-box attention bar, or (for
+a listing with no asking price) a site shape that justifies a broker call. Every
+row is a property somebody has already decided is worth a credit.
+
+That matters because the list used to be every contact without an email on any
+live property — 1,189 of them, where a few hundred were worth paying for. If you
+find yourself wanting to rank or trim this list by score, don't: the ranking has
+already happened, and the score is not on the row precisely because you should not
+be re-deciding it here.
+
 Three fields change how you treat a row:
 
 - **`contact_type: "broker"`** — Apollo's sweet spot. A named agent at a brokerage
@@ -92,7 +105,8 @@ Three fields change how you treat a row:
   always works the market the listing is in. Use it to *verify*, not to filter.
 
 Keep the `contact_id` with each person; you need it to write results back. If the
-list is empty, say every contact already has an email and stop.
+list is empty, say the enrichment queue is drained and stop — that is a smaller
+claim than "every contact has an email", and the honest one.
 
 ## Step 2 — Find the right person (free, and the step that makes this safe)
 
@@ -199,8 +213,13 @@ Put the firm and the verification basis in `notes`, e.g.
 That is the audit trail for why this address was believed.
 
 The gateway sets `enrichment_status: enriched` only when an **email** arrives, and
-promotes the property out of `needs_enrichment`. Relay the returned
-`{run_id, enriched, not_found, phone_only}`.
+advances the property out of `needs_enrichment`. Relay the returned
+`{run_id, enriched, phone_only, not_found, promoted_to_gate1}`.
+
+**`promoted_to_gate1` is the number that matters** — properties where the address
+was the last missing piece, so they went straight to a human's approval queue
+instead of waiting to be re-read. It is the actual output of the run: `enriched`
+counts addresses found, this counts deals unlocked. Report both.
 
 ## Reporting back
 
@@ -235,6 +254,8 @@ work list is mostly owner entities rather than brokers, not that Apollo is faili
   closest-looking person.
 - **Owner entities** (`Smith Family Trust`, `ABC Holdings LLC`): skip without
   spending a credit and note them as LexisNexis work.
-- **Empty work list**: every contact already has an email — say so and stop.
+- **Empty work list**: the enrichment queue is drained — say so and stop. Not
+  "every contact has an email": contacts elsewhere in the pipeline still lack one,
+  they just have not earned a lookup yet.
 - **Gateway key rejected**: stop and ask the user to re-run `/adana-dsa:adana-setup`
   with a valid `adana_live_…` key.

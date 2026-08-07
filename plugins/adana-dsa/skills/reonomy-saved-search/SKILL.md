@@ -119,8 +119,9 @@ Map onto the gateway's schema, per property:
 - `external_id` (Reonomy property id) and `listing_url` where present
 - **owner**: `first_name`, `last_name`, `company`. Reonomy surfaces the owning
   entity or reported owner; email and phone are usually absent and arrive later
-  from enrichment. The `owner` object does accept `email` and `mobile` — pass them
-  if the export happens to carry them, since either one makes the contact reachable.
+  from enrichment. The `owner` object does accept `email` and `mobile` — pass
+  whichever the export carries. Either one makes the contact worth **storing**;
+  only an **email** makes the property reachable, since outreach runs on email.
 
 **Reonomy has no `asking_price`, `source_url` or `brochure_url` in this schema.**
 If the export carries a price there is nowhere to put it — don't invent a field.
@@ -142,8 +143,12 @@ adana_ingest_reonomy(
 
 The gateway UPSERTs properties (dedup on normalized address), records a
 `property_sources` row, creates an **owner contact shell**, and sets new properties
-to **`needs_enrichment`** — owner email and phone are filled in later. Relay
+to **`sourced`** — kept, and waiting for your read. Relay
 `{run_id, found, new, updated}`.
+
+They do **not** land on the enrichment work list directly. That list is a queue a
+property earns by being scored, so Step 4 is what puts these in line for a lookup;
+skip it and they sit parked indefinitely.
 
 **Mark the file processed now**, using the snippet from Step 1, and only if the
 ingest succeeded. If more files remain in `todo`, return to Step 2 with the next
@@ -175,29 +180,37 @@ or the map supports it. Pricing is unknown, so most off-market leads land `REVIE
 — pursue the owner for a number — unless the strategic fit is strong enough for
 `PURSUE`.
 
-**Expect every one of these back in `held` with reason `no_contact`.** The owner
-shell has no email or phone, and the gateway will not promote a property to
-`qualified` without a usable contact, so it stores your overlay and leaves the
-status at `needs_enrichment`. That is the designed path for off-market leads, not
-an error: score them now, while the record is in front of you, and they enter
-Gate 1 after enrichment.
+**Expect these back in `held`, and the reason tells you what happened.** The owner
+shell has no email, and the gateway never promotes a property to `qualified`
+without one — outreach runs on email.
 
-**Still send a real `score`.** Once enrichment supplies a contact, the score is
-what decides whether the property surfaces to a human at all — a missing one holds
-it (`no_score`). Off-market leads with no price are genuinely hard to call: score
-them honestly low rather than inflating to keep them moving. **The judgment is
-yours; the cutoff is the gateway's**, and you are not told where it sits — that is
-what keeps the score a measurement rather than a target.
+- **`no_contact`** — the score cleared the bar, so the property is now **queued
+  for enrichment**. This is the good outcome: once a lookup supplies the address
+  it goes straight into Gate 1, with no second read needed from you.
+- **`below_score`** — it did not clear the bar, so it stays in `sourced` and no
+  credit is spent on it. Also correct.
+
+Either way the overlay is stored. Score them now, while the record is in front of
+you; that judgment is unrecoverable later.
+
+**Still send a real `score`.** It is what decides whether a lookup is ever spent
+on the property at all — a missing one holds it (`no_score`) and it goes nowhere.
+Off-market leads with no price are genuinely hard to call: score them honestly low
+rather than inflating to keep them moving. **The judgment is yours; the cutoff is
+the gateway's**, and you are not told where it sits — that is what keeps the score
+a measurement rather than a target.
 
 ## Reporting back
 
 How many properties captured, the ingest counts (`new` / `updated`), and how many
 you scored (`saved`) — with `held` alongside, which for Reonomy will normally equal
-`saved` and be entirely `no_contact`.
+`saved`, since the owner shell has no email.
 
-Say plainly that these are scored but **not yet in Gate 1**: they are queued for
-contact enrichment (`apollo-email-lookup` first, then `lexisnexis-contact-lookup`)
-and enter Gate 1 once a contact lands, if the conviction score clears the cutoff.
+**Break the holds down, because the two mean opposite things.** `no_contact` is
+the score clearing the bar — those are now queued for enrichment and will reach
+Gate 1 as soon as an address lands. `below_score` did not clear it, so no lookup
+will be spent and the property waits in `sourced`. Reporting a single `held` total
+hides which of your reads actually moved anything.
 
 ## Edge cases
 
@@ -210,8 +223,8 @@ and enter Gate 1 once a contact lands, if the conviction score clears the cutoff
 - **Empty export**: the saved search returned nothing. Ask them to confirm they ran
   the search they meant.
 - **No owner columns**: the export was configured without them. The properties are
-  still worth ingesting, but say that every one will land as `needs_enrichment`
-  with no contact at all — and that re-exporting with owner columns included is
-  worth more than any enrichment run.
+  still worth ingesting, but say that every one lands in `sourced` with an empty
+  owner shell — nobody to look up, so no enrichment can ever reach them.
+  Re-exporting with owner columns included is worth more than any enrichment run.
 - **Gateway key rejected**: stop and ask the user to re-run
   `/adana-dsa:adana-setup` with a valid `adana_live_…` key.

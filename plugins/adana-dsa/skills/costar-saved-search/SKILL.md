@@ -11,12 +11,12 @@ description: >-
   Southeast") and asks to run, pull, process, refresh or screen it — including
   casually, like "run Montana through CoStar" or "I've dropped the export in, take
   it from here".
-allowed-tools: mcp__gateway__adana_screen_costar mcp__gateway__adana_ingest_costar_export mcp__gateway__adana_save_qualification
+allowed-tools: mcp__gateway__adana_screen_costar mcp__gateway__adana_ingest_costar_export mcp__gateway__adana_targets_needing_qualification mcp__gateway__adana_save_qualification
 area: Collection
-use_for: "Process a CoStar export the user has placed in the project folder: screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + contacts, and write back the qualification (score + why + buy-box checklist)."
+use_for: "Process a CoStar export the user has placed in the project folder: screen it (FAR/PLSF/PSFB via gateway), persist deduped properties + contacts, then score every property the gateway kept — draining the backlog until it is empty."
 deps:
   mcp: []
-  gateway: ["adana_screen_costar", "adana_ingest_costar_export", "adana_save_qualification"]
+  gateway: ["adana_screen_costar", "adana_ingest_costar_export", "adana_targets_needing_qualification", "adana_save_qualification"]
   files: ["exports/CostarExport*.xlsx (read)"]
   env: ["gateway_api_key", "ADANA_EXPORT_DIR"]
 ---
@@ -289,13 +289,34 @@ adana_screen_costar(
 ```
 
 The gateway derives FAR / PLSF / PSFB and applies the land-vs-building bands
-(FAR < 10% → PLSF < $17; 10–18% → PLSF < $23; > 18% → PSFB < $120), dedupes by
-address + city, and returns `qualifiers`, `near_misses` (within 10% of the
-ceiling) and `no_price`.
+(FAR < 10% → PLSF < $17; 10–18% → PLSF < $23; > 18% → PSFB < $120) and dedupes by
+address + city.
+
+**Every row lands in exactly one bucket**, and `summary.accounted_for` must equal
+`summary.total`:
+
+| Bucket | Meaning |
+|---|---|
+| `qualifiers` | under the ceiling |
+| `near_misses` | within 10% above it |
+| `screened_out` | past that — looked at and rejected |
+| `no_price` | the source has no price. Expected, not an error — flow3 |
+| `incomplete` | **you didn't send enough columns to screen a PRICED row** |
+
+**`incomplete` is your bug, and it is the one to act on.** Each entry names the
+missing columns. The Industrial saved layout carries RBA and Land Area (AC) on
+every row, so a gap means the mapping dropped them — go back to Step 2, fix it,
+and re-screen. Do not proceed with rows in `incomplete`.
+
+`no_price` is the opposite: a fact about the listing that no retry changes. Never
+treat it as an error and never try to "fix" it by resending.
 
 Present this **in chat**: name the qualifiers with their FAR band and the metric
-that cleared, call out near-misses, note how many rows had no price. Don't restate
-every property.
+that cleared, call out near-misses, give the counts for screened-out and no-price.
+Don't restate every property.
+
+Screening is **advisory here** — it tells you what the price says. It does not
+decide what gets stored; the gateway re-runs this same screen itself at ingest.
 
 ## Step 4 — Ingest (persist via gateway)
 
@@ -324,17 +345,38 @@ On the `broker` object:
   carries none of them — omit rather than invent.
 
 The gateway UPSERTs properties (dedup on normalized address), records a
-`property_sources` row per listing, UPSERTs the contact, and sets status
-(contactable → `sourced`; no contact → `needs_enrichment`). Relay
-`{run_id, found, new, updated, contacts}`.
+`property_sources` row per listing, UPSERTs the contact, **screens every row**
+and decides what to keep. Relay `{run_id, found, new, updated, contacts,
+emailable, kept, rejected, incomplete}`.
+
+**Rejection is normal — expect roughly a quarter of an export.** `rejected`
+breaks down by reason, and each means something different:
+
+- **`fails_screen`** — priced above the buy-box ceiling. The permanent verdict.
+- **`no_yield_shape`** — no price, and a site shape that has never produced a
+  deal (high coverage on real acreage, or anything non-land-play under 2 acres).
+- **`no_contact`** — nobody attached, so no enrichment can ever reach it. A later
+  export carrying broker columns revives it.
+
+**`incomplete` is NOT normal.** Same meaning as in Step 3: priced rows you sent
+without the columns needed to screen them. The gateway deliberately leaves their
+existing verdict untouched rather than overwriting it with a guess. Re-read those
+rows from the export and call ingest again with the missing columns.
+
+What is kept lands in **`sourced`** — screened, kept, and waiting for your read.
+The exception is a no-price listing whose site shape justifies a broker call:
+that goes straight onto the enrichment queue, because it can never earn a place
+there by being scored.
 
 **Compare `contacts` to `with_contact` from Step 2.** If Step 2 found 485 contacts
 and ingest returns `contacts: 0`, the broker objects didn't survive the mapping —
 stop and fix it rather than reporting a clean run. A silent zero here is exactly
 how 485 contacts were lost once.
 
-A contact with a phone but no email keeps `enrichment_status: pending` and stays on
-the enrichment work list. That's correct — outreach needs the email.
+A contact with a phone but no email keeps `enrichment_status: pending`. It does
+**not** automatically join the enrichment work list: that list is a queue a
+property earns, and most of these are still sitting in `sourced` waiting for the
+score you are about to give them in Step 5. Skip Step 5 and they wait for ever.
 
 **Mark the file processed only now**, using the snippet from Step 1, and only if
 the ingest succeeded. Marking earlier means a run that fails midway is never
@@ -347,8 +389,41 @@ If more files remain in `todo`, go back to Step 2 with the next one.
 Screening only tells you whether the **price** clears the buy-box. The
 recommendation — a graded conviction score, the *why*, and the strategic checklist
 — is **yours**: you have the CoStar row and the map, none of which the gateway
-sees. Score **every** property you ingested, including ones with no contact. That
-judgment is captured now or lost.
+sees.
+
+### Ask the gateway what needs scoring — do not work from memory
+
+```
+adana_targets_needing_qualification(gateway_api_key: "${GATEWAY_API_KEY}", limit: 40)
+```
+
+Returns properties the gateway **kept but nobody has scored**, oldest first, with
+the raw columns you need. **Keep calling it until it comes back empty.** The
+response includes `more_likely`, which is true when the batch came back full — so
+you can tell "backlog drained" from "batch was capped".
+
+This loop is the point. Working from the Step 3 screen result instead is what
+went wrong before: the screen only ever hands you `qualifiers` and `near_misses`,
+so "score everything I ingested" silently meant "score everything the screen
+surfaced". **466 properties reached the database with no assessment against them
+at all**, indistinguishable from ones nobody had reached yet — and because
+nothing ever asked what was left over, they stayed that way. The work list is a
+question you ask the gateway, not a list you keep in your head.
+
+It also survives a session ending mid-batch, which the old approach did not.
+
+### No-price listings get NO score
+
+A `source_variant` of `costar_no_price` means there is no asking price. Every
+buy-box measure divides by price, so there is no ratio to grade and **no score to
+send**. Do not invent one — a fabricated score is compared against the same
+threshold as a measured one, and there is no way to tell them apart afterwards.
+
+Those properties were already routed at ingest on site shape, into broker pricing
+outreach (flow3). Skip them here.
+
+Score **every priced property in the work list**, including ones with no contact.
+That judgment is captured now or lost.
 
 ```
 adana_save_qualification(
@@ -387,20 +462,27 @@ adana_save_qualification(
 
 ### Scoring is not promoting
 
-A property reaches Gate 1 — where a human approves outreach — only when it has a
-usable contact, carries a `score`, and that score is strong enough. Your overlay is
-stored either way; the property keeps its current status. The response returns
-`held` (address + reason) and `held_by_reason` (counts).
+A property reaches Gate 1 — where a human approves outreach — only when it carries
+a `score`, that score is strong enough, **and** somebody can be reached by EMAIL.
+A mobile is stored and valued but is not a substitute: outreach runs on email.
+Your overlay is stored either way. The response returns `held` (address + reason)
+and `held_by_reason` (counts).
 
-Holds are normal. Each reason means something different:
+Holds are normal, and each reason means something different:
 
-- **`no_contact`** — no email and no mobile. Should be *small* once Step 2 maps the
-  contact columns. **A `no_contact` count near your item count means the contact
-  mapping didn't work** — go back and fix it rather than accepting the holds.
 - **`no_score`** — always your bug. Omitting the score holds the property; it does
   not slip past.
 - **`below_score`** — the conviction score was too low to put in front of a human.
   The system working.
+- **`no_contact`** — cleared the floor, but there is no email yet. **This one is
+  progress, not a problem**: the property is now queued for enrichment, and the
+  address it comes back with carries it straight into Gate 1 without needing
+  another read from you.
+
+The reasons are checked in that order, and the order is deliberate. Below the
+floor, "find a contact" is not the fix that comes first — the lookup would not be
+spent either way, so the score is reported as the reason instead. A `no_contact`
+hold therefore only ever appears on a property genuinely worth the credit.
 
 **Score your honest read, and don't reverse-engineer the cutoff.** The threshold is
 deliberately not published here or in the tool schema, so the score stays a
@@ -410,18 +492,30 @@ someone's time. Expect a substantial share of any run to be held.
 
 ## Reporting back
 
-Qualifier count and names, near-misses, no-price count, ingest counts
-(`new` / `updated` / `contacts`), and the qualification outcome.
+Qualifier count and names, near-misses, ingest counts (`new` / `updated` /
+`contacts` / `kept` / `rejected`), and the qualification outcome.
 
-Three numbers that are easy to conflate — report them separately:
+Numbers that are easy to conflate — report them separately:
 
 - **`contacts`** — listings that landed with a contact. Should match `with_contact`.
+- **`kept` vs `rejected`** — break the rejections down by reason. *"1,244 ingested,
+  679 kept, 565 rejected: 466 above the ceiling, 70 with no contact, 29 on site
+  shape."* A quarter of an export being rejected is ordinary.
 - **`qualified` vs `saved`** — `saved` is overlays stored; `qualified` is how many
-  reached Gate 1. Break holds down by reason: *"scored 181 — 32 in Gate 1; 142 held
-  on conviction score, 7 awaiting a contact."*
-- **`with_email`** — how many contacts still lack an email, and so remain on the
-  enrichment work list. If the layout carried no email column, say that adding one
-  would remove most of that work.
+  reached Gate 1. Break holds down by reason: *"scored 684 — 221 clear the floor,
+  of which 198 are now queued for enrichment; 463 held on conviction score."*
+- **`with_email`** — how many contacts still lack an email. If the layout carried
+  no email column, say so: adding one is the single highest-value change available
+  to this pipeline.
+
+**Two things to state plainly if they are non-zero**, because both mean work is
+outstanding rather than done:
+
+- **`incomplete`** — rows you under-sent, still unscreened. Name the count and say
+  they need resending.
+- **the backlog** — if `adana_targets_needing_qualification` still returns rows
+  when you stop, say how many are left unscored. Never end a run implying the
+  batch is complete when it isn't; that is exactly how 466 properties were lost.
 
 ## Edge cases
 
@@ -446,7 +540,8 @@ Three numbers that are easy to conflate — report them separately:
 - **Expected column missing** (`RBA`, `Sales Contact`): the wrong layout. Ask for a
   re-export; don't work around it, since the missing columns carry price, size and
   contacts.
-- **Several exports at once** (multiple saved searches): process one at a time,
-  each with its own `location`. Merging them loses which search found what.
+- **`incomplete` came back non-empty**: priced rows you under-sent. They are stored
+  but unscreened, and they will keep appearing in the qualification backlog until
+  the columns arrive. Resend them; don't close the run out.
 - **Gateway key rejected**: stop and ask the user to re-run
   `/adana-dsa:adana-setup` with a valid `adana_live_…` key.

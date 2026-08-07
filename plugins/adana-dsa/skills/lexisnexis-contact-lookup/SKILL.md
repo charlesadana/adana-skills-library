@@ -2,8 +2,9 @@
 name: lexisnexis-contact-lookup
 description: >-
   Find the missing EMAIL for Adana's contacts (and any missing phone) using
-  LexisNexis Public Records. Writes a work-list spreadsheet of everyone still
-  without an email, which the user works through in LexisNexis themselves, then
+  LexisNexis Public Records. Writes a work-list spreadsheet from the gateway's
+  enrichment queue — contacts without an email, on properties already judged worth
+  the lookup — which the user works through in LexisNexis themselves, then
   reads their completed sheet back from the project folder and writes the results
   through the gateway. Use this whenever the user wants to "enrich contacts",
   "find owner emails/phones", "run LexisNexis / Nexis / SmartLinx / Accurint" or
@@ -23,7 +24,8 @@ deps:
 
 **The job is the email.** Adana reaches people by email, and an email is the one
 detail its sources rarely supply — CoStar gives phones, Reonomy gives owner
-shells. So this skill works one list: every contact that still has no email.
+shells. So this skill works one list: the enrichment queue — contacts with no
+email, on properties already judged worth the lookup.
 
 **The user runs the lookups; you handle the list and the write-back.** SmartLinx
 is a per-person interactive report that needs a human to judge whether it is
@@ -68,11 +70,21 @@ Returns one entry per contact with no email, least-recently-attempted first:
 `{ contact_id, first_name, last_name, contact_type, address, city, state,
 has_mobile, already_attempted, property_status }`.
 
-If the list is empty, say every contact already has an email and stop.
+If the list is empty, say the enrichment queue is drained and stop. That does
+**not** mean every contact has an email — it means nothing currently in the queue
+is missing one. Plenty of contacts elsewhere in the pipeline still lack an
+address; they simply have not earned a lookup yet.
 
-**The list is "no email yet" — independent of pipeline status.** A property can
-already be `qualified` (a phone was enough to get it there) and still appear here,
-because outreach needs the email. Disqualified properties are the only exclusion.
+**The list is the QUEUE, already shortlisted — do not filter or rank it further.**
+It contains only contacts on properties in `needs_enrichment`, and a property
+earns that place by clearing the conviction bar, or — for a listing with no asking
+price, which can never be scored — by a site shape worth a broker call. Every row
+is one somebody has already decided is worth the work.
+
+**Run `apollo-email-lookup` first.** It works this same queue by API, unattended
+and at trivial cost, so whatever reaches your sheet is what Apollo could not
+resolve: private individuals and owner entities, which is exactly what SmartLinx
+is better at. Running it first is what keeps the user's sheet short.
 
 - **`has_mobile: true`** — the phone is already known, so only the email is
   missing. This drives the `already_has_phone` column, which is what stops a good
@@ -236,8 +248,13 @@ CoStar already provided — which is exactly what the `already_has_phone` filter
 above does. Sending an uncertain phone would overwrite a listing-sourced number
 with a person-report guess.
 
-The gateway promotes the contact's property from `needs_enrichment` → `enriched`
-and returns `{run_id, enriched, not_found, phone_only}`.
+The gateway advances the contact's property out of `needs_enrichment` and returns
+`{run_id, enriched, phone_only, not_found, promoted_to_gate1}`.
+
+**`promoted_to_gate1` is the number that matters.** A property that had already
+earned Gate 1 and was only missing an address goes straight to `qualified` rather
+than waiting to be re-read. `enriched` counts addresses found; this counts deals
+unlocked. Report both.
 
 **`enrichment_status` becomes `enriched` only when an EMAIL was found.** A
 phone-only result counts as `phone_only`: real progress, but the contact stays on
@@ -262,7 +279,9 @@ If the work list was capped, say how many contacts are still outstanding.
 
 ## Edge cases
 
-- **Empty work list**: every contact already has an email — stop and say so.
+- **Empty work list**: the enrichment queue is drained — stop and say so. Do not
+  report it as "every contact has an email"; it means nothing currently queued is
+  missing one, which is a much smaller claim.
 - **No `results_*.csv` yet**: they haven't finished, or saved it elsewhere. Ask —
   don't reprocess an older sheet.
 - **Results file older than the work list you just wrote**: they saved over a
